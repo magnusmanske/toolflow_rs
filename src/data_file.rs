@@ -60,12 +60,6 @@ impl DataFile {
         let reader = self.reader.as_ref()?;
         let file = reader.get_ref();
         Some(file.metadata().ok()?.len())
-
-        // let path = self.path();
-        // let path = path.as_ref()?;
-        // let path = Path::new(path);
-        // let len = path.metadata().ok()?.len();
-        // Some(len)
     }
 
     pub fn path(&self) -> Option<String> {
@@ -73,7 +67,7 @@ impl DataFile {
         Some(format!("{}/{name}.jsonl",APP.data_path()))
     }
 
-    pub fn name(&self) -> &Option<String> {
+    pub fn uuid(&self) -> &Option<String> {
         &self.uuid
     }
 

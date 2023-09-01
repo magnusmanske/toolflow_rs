@@ -120,6 +120,6 @@ impl App {
             };
             output_file.write_json_row(&json!(row))?;
         }
-        Ok(output_file.name().as_ref().unwrap().to_string())
+        Ok(output_file.uuid().as_ref().unwrap().to_string())
     }
 }

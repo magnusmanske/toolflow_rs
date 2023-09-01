@@ -77,7 +77,7 @@ impl Adapter for SparqlAdapter {
             }
             self.add_output_row(&json!{jsonl_row})?; // Output data row
         }
-        Ok(self.file.name().as_ref().unwrap().to_string())
+        Ok(self.file.uuid().as_ref().unwrap().to_string())
     }
 }
 
@@ -127,6 +127,6 @@ impl Adapter for QuarryAdapter {
             }
             self.add_output_row(&json!{jsonl_row})?; // Output data row
         }
-        Ok(self.file.name().as_ref().unwrap().to_string())
+        Ok(self.file.uuid().as_ref().unwrap().to_string())
     }
 }
