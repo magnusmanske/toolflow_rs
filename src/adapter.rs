@@ -1,8 +1,7 @@
+use std::io::{BufWriter, Write};
 use std::{fs::File, collections::HashMap};
-use std::io::Write;
 use async_trait::async_trait;
 use anyhow::{anyhow, Result};
-use bzip2::write::BzEncoder;
 use serde_json::{Value, json};
 
 use crate::data_file::DataFile;
@@ -13,7 +12,7 @@ use crate::{data_header::*, APP};
 #[async_trait]
 pub trait Adapter {
     async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<String>;
-    fn writer(&mut self) -> Result<&mut BzEncoder<File>>;
+    fn writer(&mut self) -> Result<&mut BufWriter<File>>;
     fn add_output_row(&mut self, v: &Value) -> Result<()> {
         let fh = self.writer()?;
         fh.write(v.to_string().as_bytes())?;
@@ -30,7 +29,7 @@ pub struct SparqlAdapter {
 
 #[async_trait]
 impl Adapter for SparqlAdapter {
-    fn writer(&mut self) -> Result<&mut BzEncoder<File>> {
+    fn writer(&mut self) -> Result<&mut BufWriter<File>> {
         if !self.file.is_output_open() {
             self.file.open_named_output_file("test_sparql")?;
         }
@@ -90,7 +89,7 @@ pub struct QuarryAdapter {
 
 #[async_trait]
 impl Adapter for QuarryAdapter {
-    fn writer(&mut self) -> Result<&mut BzEncoder<File>> {
+    fn writer(&mut self) -> Result<&mut BufWriter<File>> {
         if !self.file.is_output_open() {
             self.file.open_named_output_file("test_quarry")?;
         }

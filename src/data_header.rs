@@ -61,6 +61,24 @@ impl DataCell {
             ColumnHeaderType::Float => Some(Self::Float(value.as_f64()?))
         }
     }
+
+    pub fn as_key(&self) -> String {
+        match self {
+            DataCell::PlainText(s) => s.to_string(),
+            DataCell::WikiPage(wiki_page) => {
+                // TODO ugly fixme
+                let blank = String::new();
+                let title = wiki_page.title.as_ref().unwrap_or(&blank);
+                let namespace = wiki_page.ns_prefix.as_ref().unwrap_or(&blank);
+                let fallback = format!("{namespace}:{title}");
+                let fullname = wiki_page.prefixed_title.as_ref().unwrap_or(&fallback);
+                let wiki = wiki_page.wiki.as_ref().unwrap_or(&blank);
+                format!("{wiki}::{fullname}")
+            },
+            DataCell::Int(i) => format!("{i}"),
+            DataCell::Float(f) => format!("{f}"),
+        }
+    }
 }
 
 
@@ -73,4 +91,16 @@ pub struct ColumnHeader {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DataHeader {
     pub columns: Vec<ColumnHeader>
+}
+
+impl DataHeader {
+    pub fn get_col_num(&self, key: &str) -> Option<usize> {
+        self.columns.iter().enumerate().filter(|(_col_num,ch)|ch.name==key).map(|(col_num,_)|col_num).next()
+    }
+
+    pub fn add_header(&mut self, header: DataHeader) {
+        // TODO duplicate column name warning/error
+        let mut header = header;
+        self.columns.append(&mut header.columns);
+    }
 }

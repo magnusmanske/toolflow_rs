@@ -1,24 +1,19 @@
+use std::collections::HashMap;
 use std::{fmt, fs::File};
-use std::io::{Write, BufReader, Read, BufWriter};
+use std::io::{Write, BufReader, BufWriter, BufRead};
 use anyhow::{anyhow, Result};
-use bzip2::Compression;
 use serde_json::Value;
-use bzip2::bufread::BzDecoder;
-use bzip2::bufread::BzEncoder;
 use uuid::Uuid;
 use crate::APP;
 use crate::data_header::{DataHeader, DataCell};
 
-const BUFFER_SIZE: usize = 40;
-
 #[derive(Default)]
 pub struct DataFile {
-    reader: Option<BzDecoder<BufReader<File>>>,
-    writer: Option<BzEncoder<BufWriter<File>>>,
+    reader: Option<BufReader<File>>,
+    writer: Option<BufWriter<File>>,
     uuid: Option<String>,
     header: DataHeader,
-    rows: Vec<Vec<DataCell>>,
-    bytes_read: Vec<u8>,
+    pub rows: Vec<Vec<DataCell>>,
 }
 
 impl fmt::Debug for DataFile {
@@ -47,8 +42,7 @@ impl DataFile {
         self.uuid = Some(uuid.to_string());
         let path = self.path().expect("base name was just set, this should be impossible");
         let file_handle = File::create(path)?;
-        let buf_writer = BufWriter::new(file_handle);
-        let writer = BzEncoder::new(buf_writer, Compression::best());
+        let writer = BufWriter::new(file_handle);
         self.writer = Some(writer);
         Ok(())
     }
@@ -57,16 +51,14 @@ impl DataFile {
         self.uuid = Some(uuid.to_string());
         let path = self.path().expect("base name was just set, this should be impossible");
         let file_handle = File::open(path)?;
-        let buf_reader = BufReader::new(file_handle);
-        let reader = BzDecoder::new(buf_reader);
+        let reader = BufReader::new(file_handle);
         self.reader = Some(reader);
         Ok(())
     }
 
     pub fn file_size(&self) -> Option<u64> {
         let reader = self.reader.as_ref()?;
-        let buf_reader = reader.get_ref();
-        let file = buf_reader.get_ref();
+        let file = reader.get_ref();
         Some(file.metadata().ok()?.len())
 
         // let path = self.path();
@@ -78,7 +70,7 @@ impl DataFile {
 
     pub fn path(&self) -> Option<String> {
         let name = self.uuid.as_ref()?;
-        Some(format!("{}/{name}.jsonl.bz2",APP.data_path()))
+        Some(format!("{}/{name}.jsonl",APP.data_path()))
     }
 
     pub fn name(&self) -> &Option<String> {
@@ -93,7 +85,7 @@ impl DataFile {
         self.reader.is_some()
     }
 
-    pub fn writer(&mut self) -> Result<&mut BzEncoder<File>> {
+    pub fn writer(&mut self) -> Result<&mut BufWriter<File>> {
         match self.writer.as_mut() {
             Some(writer) => Ok(writer),
             None => Err(anyhow!("No writer open")),
@@ -101,77 +93,57 @@ impl DataFile {
     }
 
     pub fn read_row(&mut self) -> Option<String> {
-        println!("1");
-        let reader = self.reader.as_mut()?;
-        println!("2");
-
-        // Poor man's readbuf
-        let line: String;
-        let mut buffer = [0; BUFFER_SIZE];
-        let mut bytes_read ;
-        let mut eof_reached = false;
-        println!("3");
-        loop {
-            println!("A");
-            if self.bytes_read.contains(&10) {
-                println!("A1");
-                let first: Vec<u8> = self.bytes_read.iter().take_while(|b|**b!=10).map(|b|*b).collect();
-                let second: Vec<u8> = self.bytes_read.iter().skip_while(|b|**b!=10).skip(1).map(|b|*b).collect();
-                line = String::from_utf8(first).ok()?.trim().to_string();
-                self.bytes_read = second;
-                break;
-            }
-            println!("B");
-            if eof_reached {
-                println!("B1");
-                if self.bytes_read.is_empty() {
-                    return None;
-                }
-                println!("B2");
-                let first: Vec<u8> = self.bytes_read.iter().map(|b|*b).collect();
-                line = String::from_utf8(first).ok()?.trim().to_string();
-                self.bytes_read.clear();
-                break;
-            }
-
-            println!("C");
-            bytes_read = reader.read(&mut buffer[..]).ok()?;
-            self.bytes_read.append(&mut buffer.to_vec());
-            eof_reached = bytes_read < BUFFER_SIZE;
-            if eof_reached {
-                println!("EOF REACHED");
-            }
+        let mut line = String::new();
+        if self.reader.as_mut()?.read_line(&mut line).ok()? == 0 {
+            None // No empty lines expected, mut be the end
+        } else {
+            Some(line)
         }
-        println!("X");
-        println!("{line}\n");
-        Some(line)
     }
 
     pub fn load_header(&mut self) -> Result<()> {
         let row = self.read_row().ok_or(anyhow!("No header row in JSONL file"))?;
-        println!("Row");
         self.header = serde_json::from_str(&row)?;
         Ok(())
     }
 
     pub fn load(&mut self) -> Result<()> {
-        println!("Q1");
         if self.header.columns.is_empty() {
-            println!("Q2");
             self.load_header()?;
         }
-        println!("Q3");
         loop {
-            println!("!!");
             let row = match self.read_row() {
                 Some(row) => row,
                 None => break,
             };
-            println!("!!!! ?{row}?");
             let row: Vec<DataCell> = serde_json::from_str(&row)?;
             self.rows.push(row);
-            println!("!!!!!!");
         }
         Ok(())
+    }
+
+    pub fn header(&self) -> &DataHeader {
+        &self.header
+    }
+
+    pub fn key2row(&self, key: &str) -> Result<HashMap<String,usize>> {
+        let mut ret = HashMap::new();
+        let key_col_num = self.header.get_col_num(key).ok_or(anyhow!("No column named '{key}'"))?;
+        for (row_num,row) in self.rows.iter().enumerate() {
+            let cell = match row.get(key_col_num) {
+                Some(cell) => cell,
+                None => return Err(anyhow!("None value found for key '{key}' in data row {row_num}")),
+            };
+            let cell_key = cell.as_key();
+            if ret.contains_key(&cell_key) {
+                return Err(anyhow!("Duplicate key '{cell_key}' for '{key}' in data row {row_num}"));
+            }
+            ret.insert(cell_key, row_num);
+        }
+        Ok(ret)
+    }
+
+    pub fn add_header(&mut self, header: DataHeader) {
+        self.header.add_header(header);
     }
 }

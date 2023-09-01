@@ -1,8 +1,9 @@
-use std::{fs::File, io::{Write, Seek}};
+use std::{fs::File, io::{Write, Seek}, collections::HashMap};
 use anyhow::{Result, anyhow};
+use serde_json::json;
 use tempfile::*;
 
-use crate::data_file::DataFile;
+use crate::{data_file::DataFile, data_header::DataCell};
 
 pub const USER_AGENT: &'static str = "ToolFlow/0.1";
 const REQWEST_TIMEOUT: u64 = 60;
@@ -53,7 +54,7 @@ impl App {
         }*/
     }
 
-    pub fn inner_join_on_key(&self, uuids: Vec<&str>, _key: &str) -> Result<String> {
+    pub fn inner_join_on_key(&self, uuids: Vec<&str>, key: &str) -> Result<String> {
         if uuids.is_empty() {
             return Err(anyhow!("No UUIDs given to inner_join_on_key"));
         }
@@ -68,8 +69,57 @@ impl App {
             *size = file.file_size().ok_or(anyhow!("{} has no file size",file.path().unwrap()))?;
         }
         files.sort_by_key(|k| k.2);
-        println!("{files:?}");
-        files[1].1.load()?;
-        Ok("".to_string())
+
+        let mut main_file = files.remove(0).1;
+        main_file.load()?;
+        let key2row = main_file.key2row(key)?;
+        let mut keys_found: HashMap<String,usize> = HashMap::new();
+        for (_uuid,file,_size) in files.iter_mut() {
+            file.load_header()?;
+            let mut new_header = file.header().to_owned();
+            println!("> {new_header:?}");
+            let key_col_num = new_header.get_col_num(key).ok_or(anyhow!("No key '{key} in file {}",file.path().unwrap()))?;
+            new_header.columns.remove(key_col_num);
+            main_file.add_header(new_header);
+
+            loop {
+                let row = match file.read_row() {
+                    Some(row) => row,
+                    None => break,
+                };
+                let mut row: Vec<DataCell> = serde_json::from_str(&row)?;
+                let new_key = match row.get(key_col_num) {
+                    Some(new_key) => new_key,
+                    None => continue, // Ignore blank key
+                }.as_key();
+                let row_id = match key2row.get(&new_key) {
+                    Some(id) => *id,
+                    None => continue , // Not in the first file
+                };
+                *keys_found.entry(new_key.to_owned()).or_insert(0) += 1;
+                row.remove(key_col_num);
+                main_file.rows[row_id].append(&mut row);
+            }    
+        }
+        let keys_in_all_files: Vec<&String> = keys_found.iter()
+            .filter(|(_,count)|**count==files.len())
+            .map(|(key_name,_)|key_name)
+            .collect();
+        
+        let mut output_file = DataFile::default();
+        output_file.open_named_output_file("test_join")?;
+        output_file.write_json_row(&json!(main_file.header()))?;
+        for key in keys_in_all_files {
+            let row_id = match key2row.get(key) {
+                Some(id) => *id,
+                None => continue,
+            };
+            let row = match main_file.rows.get(row_id) {
+                Some(row) => row,
+                None => continue,
+            };
+            output_file.write_json_row(&json!(row))?;
+        }
+        Ok(output_file.name().as_ref().unwrap().to_string())
     }
 }
