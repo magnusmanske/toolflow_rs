@@ -2,8 +2,10 @@ use std::{fs::File, collections::HashMap};
 use std::io::Write;
 use async_trait::async_trait;
 use anyhow::{anyhow, Result};
+use bzip2::write::BzEncoder;
 use serde_json::{Value, json};
 
+use crate::data_file::DataFile;
 use crate::mapping::{HeaderMapping, SourceId};
 use crate::{data_header::*, APP};
 
@@ -11,10 +13,9 @@ use crate::{data_header::*, APP};
 #[async_trait]
 pub trait Adapter {
     async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<String>;
-    fn open_output_file(&mut self) -> Result<()> ;
-    fn output_file_handle(&mut self) -> Result<&mut File>;
+    fn writer(&mut self) -> Result<&mut BzEncoder<File>>;
     fn add_output_row(&mut self, v: &Value) -> Result<()> {
-        let fh = self.output_file_handle()?;
+        let fh = self.writer()?;
         fh.write(v.to_string().as_bytes())?;
         fh.write(b"\n")?;
         Ok(())
@@ -24,27 +25,16 @@ pub trait Adapter {
 
 #[derive(Debug, Default)]
 pub struct SparqlAdapter {
-    pub output_file_handle: Option<File>,
-    pub output_file_name: Option<String>,
+    file: DataFile,
 }
 
 #[async_trait]
 impl Adapter for SparqlAdapter {
-    fn open_output_file(&mut self) -> Result<()> {
-        let path = format!("./tmp/test_sparql.jsonl");
-        self.output_file_name = Some(path.to_owned());
-        self.output_file_handle = Some(File::create(path)?);
-        Ok(())
-    }
-
-    fn output_file_handle(&mut self) -> Result<&mut File> {
-        if self.output_file_handle.is_none() {
-            self.open_output_file()?;
+    fn writer(&mut self) -> Result<&mut BzEncoder<File>> {
+        if !self.file.is_output_open() {
+            self.file.open_named_output_file("test_sparql")?;
         }
-        match self.output_file_handle.as_mut() {
-            Some(file_handle) => Ok(file_handle),
-            None => Err(anyhow!("No file handle open")),
-        }
+        self.file.writer()
     }
 
     async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<String> {
@@ -88,34 +78,23 @@ impl Adapter for SparqlAdapter {
             }
             self.add_output_row(&json!{jsonl_row})?; // Output data row
         }
-        Ok(self.output_file_name.as_ref().unwrap().to_string())
+        Ok(self.file.name().as_ref().unwrap().to_string())
     }
 }
 
 
 #[derive(Debug, Default)]
 pub struct QuarryAdapter {
-    pub output_file_handle: Option<File>,
-    pub output_file_name: Option<String>,
+    file: DataFile,
 }
 
 #[async_trait]
 impl Adapter for QuarryAdapter {
-    fn open_output_file(&mut self) -> Result<()> {
-        let path = format!("./tmp/test_quarry.jsonl");
-        self.output_file_name = Some(path.to_owned());
-        self.output_file_handle = Some(File::create(path)?);
-        Ok(())
-    }
-
-    fn output_file_handle(&mut self) -> Result<&mut File> {
-        if self.output_file_handle.is_none() {
-            self.open_output_file()?;
+    fn writer(&mut self) -> Result<&mut BzEncoder<File>> {
+        if !self.file.is_output_open() {
+            self.file.open_named_output_file("test_quarry")?;
         }
-        match self.output_file_handle.as_mut() {
-            Some(file_handle) => Ok(file_handle),
-            None => Err(anyhow!("No file handle open")),
-        }
+        self.file.writer()
     }
 
     async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<String> {
@@ -149,6 +128,6 @@ impl Adapter for QuarryAdapter {
             }
             self.add_output_row(&json!{jsonl_row})?; // Output data row
         }
-        Ok(self.output_file_name.as_ref().unwrap().to_string())
+        Ok(self.file.name().as_ref().unwrap().to_string())
     }
 }

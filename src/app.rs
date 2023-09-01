@@ -1,6 +1,8 @@
 use std::{fs::File, io::{Write, Seek}};
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use tempfile::*;
+
+use crate::data_file::DataFile;
 
 pub const USER_AGENT: &'static str = "ToolFlow/0.1";
 const REQWEST_TIMEOUT: u64 = 60;
@@ -10,6 +12,10 @@ pub struct App {
 }
 
 impl App {
+    pub fn data_path(&self) -> &str {
+        "./tmp"
+    }
+
     pub fn reqwest_client() -> Result<reqwest::Client> {
         Ok(reqwest::Client::builder()
             .user_agent(USER_AGENT)
@@ -45,5 +51,25 @@ impl App {
         for result in reader.records() {
             let record = result.unwrap();
         }*/
+    }
+
+    pub fn inner_join_on_key(&self, uuids: Vec<&str>, _key: &str) -> Result<String> {
+        if uuids.is_empty() {
+            return Err(anyhow!("No UUIDs given to inner_join_on_key"));
+        }
+        if uuids.len()==1 { // TODO Maybe just duplicate this file? Need to check for key presence first?
+            return Err(anyhow!("Only one UUID given to inner_join_on_key"));
+        }
+        let mut files: Vec<_> = uuids.iter()
+            .map(|uuid|(uuid,DataFile::default(),0))
+            .collect();
+        for (uuid,file,size) in &mut files {
+            file.open_input_file(uuid)?;
+            *size = file.file_size().ok_or(anyhow!("{} has no file size",file.path().unwrap()))?;
+        }
+        files.sort_by_key(|k| k.2);
+        println!("{files:?}");
+        files[1].1.load()?;
+        Ok("".to_string())
     }
 }

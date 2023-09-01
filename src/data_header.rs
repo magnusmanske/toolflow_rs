@@ -70,7 +70,7 @@ pub struct ColumnHeader {
     pub kind: ColumnHeaderType,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DataHeader {
     pub columns: Vec<ColumnHeader>
 }
