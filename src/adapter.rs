@@ -31,7 +31,7 @@ pub struct SparqlAdapter {
 impl Adapter for SparqlAdapter {
     fn writer(&mut self) -> Result<&mut BufWriter<File>> {
         if !self.file.is_output_open() {
-            self.file.open_named_output_file("test_sparql")?;
+            self.file.open_output_file()?;
         }
         self.file.writer()
     }
@@ -91,7 +91,7 @@ pub struct QuarryAdapter {
 impl Adapter for QuarryAdapter {
     fn writer(&mut self) -> Result<&mut BufWriter<File>> {
         if !self.file.is_output_open() {
-            self.file.open_named_output_file("test_quarry")?;
+            self.file.open_output_file()?;
         }
         self.file.writer()
     }

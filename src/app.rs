@@ -107,7 +107,7 @@ impl App {
             .collect();
         
         let mut output_file = DataFile::default();
-        output_file.open_named_output_file("test_join")?;
+        output_file.open_output_file()?;
         output_file.write_json_row(&json!(main_file.header()))?;
         for key in keys_in_all_files {
             let row_id = match key2row.get(key) {
