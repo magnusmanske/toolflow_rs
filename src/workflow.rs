@@ -102,6 +102,8 @@ pub struct Workflow {
     
     #[serde(skip)]
     pub node_status: Vec<WorkflowNodeStatus>,
+    #[serde(skip)]
+    run_id: Option<u64>,
 }
 
 impl Workflow {
@@ -111,6 +113,7 @@ impl Workflow {
             nodes,
             edges,
             node_status: vec![],
+            run_id: None,
         };
         ret.reset();
         ret
@@ -125,6 +128,7 @@ impl Workflow {
             .pop()
             .ok_or_else(||anyhow!("No workflow with id {id}"))?;
         ret.id = id;
+        ret.reset();
         Ok(ret)
     }
 
@@ -162,6 +166,14 @@ impl Workflow {
             .ok_or_else(||anyhow!("Can't create a run in the database for workflow {}",self.id))
     }
 
+    async fn is_run_cancelled(&self, run_id: u64, conn: &mut Conn) -> Result<bool> {
+        Ok(!"SELECT `id` FROM `run` WHERE `id`=? AND `status`='CANCEL'"
+            .with((run_id,))
+            .map(conn, |id: u64| id)
+            .await?
+            .is_empty())
+    }
+
     async fn update_run(&self, run_id: u64, status: &str, conn: &mut Conn) -> Result<()> {
         let nodes_done = self.node_status.iter().filter(|ns|ns.status==WorkflowNodeStatusValue::DONE).count();
         "UPDATE `run` SET `status`=?,`nodes_done`=? WHERE `id`=?"
@@ -172,9 +184,18 @@ impl Workflow {
     }
 
     pub async fn run(&mut self) -> Result<()> {
-        let run_id = self.create_run().await?;
+        // Create a run ID unless one is provided
+        let run_id = match self.run_id {
+            Some(run_id) => run_id,
+            None => {
+                let run_id = self.create_run().await?;
+                self.run_id = Some(run_id);
+                run_id
+            },
+        };
+
         loop {
-            println!("{self:?}");
+            // println!("{self:?}");
             let nodes_to_run = self.get_next_nodes_to_run();
             if nodes_to_run.is_empty() {
                 break;
@@ -215,8 +236,16 @@ impl Workflow {
                 .collect();
             
             let mut conn = APP.get_db_connection().await?;
+            if self.is_run_cancelled(run_id, &mut conn).await? {
+                return Err(anyhow!("User cancelled run"));
+            }
             for (node_id,uuid) in node_file {
-                r"INSERT INTO `file` (`uuid`,`expires`,`run_id`) VALUES (?,NOW() + INTERVAL 1 HOUR,?)"
+                let is_output_node = self.node_status.iter().filter(|ns|ns.node_id==node_id).map(|ns|ns.is_output_node).next();
+                let end_time = match is_output_node {
+                    Some(true) => "null",
+                    _ => "NOW() + INTERVAL 1 HOUR",
+                };
+                format!("INSERT INTO `file` (`uuid`,`expires`,`run_id`) VALUES (?,{end_time},?)")
                     .with((uuid.to_owned(),run_id))
                     .run(&mut conn)
                     .await?;
@@ -226,14 +255,7 @@ impl Workflow {
             self.update_run(run_id, "RUN", &mut conn).await?;
         }
 
-        let mut conn = APP.get_db_connection().await?;
-        let uuids: Vec<String> = self.node_status.iter().filter(|ns|ns.is_output_node).map(|ns|ns.uuid.to_owned()).collect();
-        if !uuids.is_empty() {
-            let sql = format!("UPDATE `file` SET `expires`=NULL WHERE `uuid` IN ('{}')",uuids.join("','"));
-            sql.with(()).run(&mut conn).await?;
-        }
-
-        self.update_run(run_id, "DONE", &mut conn).await?;
+        self.update_run(run_id, "DONE", &mut APP.get_db_connection().await?).await?;
 
         Ok(())
     }
