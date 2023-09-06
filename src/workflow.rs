@@ -1,3 +1,4 @@
+use toolforge::pool::mysql_async::{prelude::*, Conn};
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use futures::future::join_all;
@@ -75,11 +76,12 @@ pub struct WorkflowNodeStatus {
     node_id: usize,
     status: WorkflowNodeStatusValue,
     uuid: String,
+    is_output_node: bool,
 }
 
 impl WorkflowNodeStatus {
     fn new(node_id: usize) -> Self {
-        Self  { node_id, status: WorkflowNodeStatusValue::WAITING, uuid: String::new() }
+        Self  { node_id, status: WorkflowNodeStatusValue::WAITING, uuid: String::new() , is_output_node: false }
     }
 }
 
@@ -92,14 +94,20 @@ pub struct WorkflowEdge {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Workflow {
+    #[serde(skip)]
+    pub id: usize,
+
     pub nodes: Vec<WorkflowNode>,
     pub edges: Vec<WorkflowEdge>,
+    
+    #[serde(skip)]
     pub node_status: Vec<WorkflowNodeStatus>,
 }
 
 impl Workflow {
     pub fn new(nodes: Vec<WorkflowNode>, edges: Vec<WorkflowEdge>) -> Self {
         let mut ret = Self {
+            id: 0,
             nodes,
             edges,
             node_status: vec![],
@@ -108,11 +116,28 @@ impl Workflow {
         ret
     }
 
+    pub async fn from_id(id: usize) -> Result<Self> {
+        let mut conn = APP.get_db_connection().await?;
+        let mut ret = format!("SELECT `json` FROM `workflow` WHERE `id`={id}")
+            .with(())
+            .map(&mut conn, |j:String| serde_json::from_str::<Self>(&j).unwrap())
+            .await?
+            .pop()
+            .ok_or_else(||anyhow!("No workflow with id {id}"))?;
+        ret.id = id;
+        Ok(ret)
+    }
+
     pub fn reset(&mut self) {
         self.node_status = self.nodes.iter()
             .enumerate()
             .map(|(node_id,_node)| WorkflowNodeStatus::new(node_id) )
             .collect();
+
+        let output_nodes = self.get_output_nodes();
+        for node_id in output_nodes {
+            self.node_status[node_id].is_output_node = true;
+        }
     }
 
     pub fn has_finished(&self) -> bool {
@@ -127,7 +152,27 @@ impl Workflow {
         self.node_status.iter().any(|node_status| node_status.status==WorkflowNodeStatusValue::DONE)
     }
 
+    async fn create_run(&self) -> Result<u64> {
+        let nodes_total = self.nodes.len();
+        format!("INSERT INTO `run` (`status`,`workflow_id`,`ts_created`,`ts_last`,`nodes_total`) VALUES ('RUN',{},NOW(),NOW(),{nodes_total})",self.id)
+            .with(())
+            .run(APP.get_db_connection().await?)
+            .await?
+            .last_insert_id()
+            .ok_or_else(||anyhow!("Can't create a run in the database for workflow {}",self.id))
+    }
+
+    async fn update_run(&self, run_id: u64, status: &str, conn: &mut Conn) -> Result<()> {
+        let nodes_done = self.node_status.iter().filter(|ns|ns.status==WorkflowNodeStatusValue::DONE).count();
+        "UPDATE `run` SET `status`=?,`nodes_done`=? WHERE `id`=?"
+            .with((status,nodes_done,run_id))
+            .run(conn)
+            .await?;
+        Ok(())
+    }
+
     pub async fn run(&mut self) -> Result<()> {
+        let run_id = self.create_run().await?;
         loop {
             println!("{self:?}");
             let nodes_to_run = self.get_next_nodes_to_run();
@@ -153,12 +198,14 @@ impl Workflow {
                 futures.push(future);
             }
             let results = join_all(futures).await;
-            match results.iter().filter(|r|r.is_err()).next() {
-                Some(error_result) => match error_result {
+            if let Some(error_result) = results.iter().filter(|r|r.is_err()).next() {
+                match error_result {
                     Ok(_) => {},
-                    Err(e) => return Err(anyhow!(e.to_string())),
+                    Err(e) => {
+                        self.update_run(run_id, "FAIL", &mut APP.get_db_connection().await?).await?;
+                        return Err(anyhow!(e.to_string()));
+                    }
                 }
-                None => {},
             }
 
             let node_file: Vec<_> = results.into_iter()
@@ -166,12 +213,36 @@ impl Workflow {
                 .enumerate()
                 .map(|(num,uuid)|(nodes_to_run[num],uuid))
                 .collect();
+            
+            let mut conn = APP.get_db_connection().await?;
             for (node_id,uuid) in node_file {
+                r"INSERT INTO `file` (`uuid`,`expires`,`run_id`) VALUES (?,NOW() + INTERVAL 1 HOUR,?)"
+                    .with((uuid.to_owned(),run_id))
+                    .run(&mut conn)
+                    .await?;
                 self.node_status[node_id].uuid = uuid;
                 self.node_status[node_id].status = WorkflowNodeStatusValue::DONE;
             }
+            self.update_run(run_id, "RUN", &mut conn).await?;
         }
+
+        let mut conn = APP.get_db_connection().await?;
+        let uuids: Vec<String> = self.node_status.iter().filter(|ns|ns.is_output_node).map(|ns|ns.uuid.to_owned()).collect();
+        if !uuids.is_empty() {
+            let sql = format!("UPDATE `file` SET `expires`=NULL WHERE `uuid` IN ('{}')",uuids.join("','"));
+            sql.with(()).run(&mut conn).await?;
+        }
+
+        self.update_run(run_id, "DONE", &mut conn).await?;
+
         Ok(())
+    }
+
+    fn get_output_nodes(&self) -> Vec<usize> {
+        self.node_status.iter()
+            .map(|ns|ns.node_id)
+            .filter(|node_id| !self.edges.iter().any(|edge|edge.source_node==*node_id))
+            .collect()
     }
 
     fn node_open_dependencies(&self, node_id: usize) -> usize {

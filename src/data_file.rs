@@ -25,6 +25,12 @@ impl fmt::Debug for DataFile {
 }
 
 impl DataFile {
+    pub fn new_from_uuid(uuid: &str) -> Self {
+        let mut ret = Self::default();
+        ret.uuid = Some(uuid.to_string());
+        ret
+    }
+
     pub fn write_json_row(&mut self, v: &Value) -> Result<()> {
         let fh = self.writer()?;
         fh.write(v.to_string().as_bytes())?;

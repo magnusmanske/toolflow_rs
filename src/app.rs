@@ -2,17 +2,56 @@ use std::{fs::File, io::{Write, Seek}, collections::HashMap};
 use anyhow::{Result, anyhow};
 use serde_json::json;
 use tempfile::*;
+use toolforge::pool::mysql_async::{prelude::*, Pool, Conn};
 
 use crate::{data_file::DataFile, data_header::DataCell};
 
-pub const USER_AGENT: &'static str = "ToolFlow/0.1";
+pub const USER_AGENT: &'static str = toolforge::user_agent!("toolflow");
 const REQWEST_TIMEOUT: u64 = 60;
 
 pub struct App {
-
+    pool: Pool,
 }
 
 impl App {
+    pub fn new() -> Self {
+        Self {
+            pool: Pool::new(toolforge::db::toolsdb("s53704__toolflow_p".to_string())
+                .expect("unable to load db config")
+                .to_string()
+                .as_str(),)
+        }
+    }
+
+    pub async fn get_db_connection(&self) -> Result<Conn> {
+        Ok(self.pool.get_conn().await?)
+    }
+
+    pub async fn clear_old_files(&self) -> Result<()> {
+        let mut conn = self.get_db_connection().await?;
+        let results: Vec<(usize,String)> = "SELECT `id`,`uuid` FROM `file` WHERE `expires`<=NOW()"
+            .with(())
+            .map(&mut conn, |(id,uuid)| (id,uuid) )
+            .await?;
+        drop(conn);
+        let mut ids_to_delete = vec![];
+        for (id,uuid) in results {
+            let df = DataFile::new_from_uuid(&uuid);
+            if let Some(path) = df.path() {
+                if let Err(error) = std::fs::remove_file(&path) {
+                    println!("Could not delete file {path}: {error}");
+                    continue;
+                }
+            }
+            ids_to_delete.push(format!("{id}"));
+        }
+        if !ids_to_delete.is_empty() {
+            let mut conn = self.get_db_connection().await?;
+            format!("DELETE FROM `file` WHERE `id` IN ({})",ids_to_delete.join(",")).with(()).run(&mut conn).await?;
+        }
+        Ok(())
+    }
+
     pub fn data_path(&self) -> &str {
         "./tmp"
     }
