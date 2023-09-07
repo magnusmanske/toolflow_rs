@@ -36,18 +36,24 @@ impl App {
         drop(conn);
         let mut ids_to_delete = vec![];
         for (id,uuid) in results {
-            let df = DataFile::new_from_uuid(&uuid);
-            if let Some(path) = df.path() {
-                if let Err(error) = std::fs::remove_file(&path) {
-                    println!("Could not delete file {path}: {error}");
-                    continue;
-                }
+            match self.remove_uuid_file(&uuid) {
+                Ok(_) => ids_to_delete.push(format!("{id}")),
+                Err(e) => eprintln!("{e}"),
             }
-            ids_to_delete.push(format!("{id}"));
         }
         if !ids_to_delete.is_empty() {
             let mut conn = self.get_db_connection().await?;
             format!("DELETE FROM `file` WHERE `id` IN ({})",ids_to_delete.join(",")).with(()).run(&mut conn).await?;
+        }
+        Ok(())
+    }
+
+    pub fn remove_uuid_file(&self, uuid: &str) -> Result<()> {
+        let df = DataFile::new_from_uuid(uuid);
+        if let Some(path) = df.path() {
+            if let Err(error) = std::fs::remove_file(&path) {
+                return Err(anyhow!("Could not delete file {path}: {error}"));
+            }
         }
         Ok(())
     }
@@ -116,7 +122,6 @@ impl App {
         for (_uuid,file,_size) in files.iter_mut() {
             file.load_header()?;
             let mut new_header = file.header().to_owned();
-            println!("> {new_header:?}");
             let key_col_num = new_header.get_col_num(key).ok_or(anyhow!("No key '{key} in file {}",file.path().unwrap()))?;
             new_header.columns.remove(key_col_num);
             main_file.add_header(new_header);

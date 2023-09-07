@@ -103,7 +103,7 @@ pub struct Workflow {
     #[serde(skip)]
     pub node_status: Vec<WorkflowNodeStatus>,
     #[serde(skip)]
-    run_id: Option<u64>,
+    pub run_id: Option<u64>,
 }
 
 impl Workflow {
@@ -138,13 +138,12 @@ impl Workflow {
             .map(|(node_id,_node)| WorkflowNodeStatus::new(node_id) )
             .collect();
 
-        let output_nodes = self.get_output_nodes();
-        for node_id in output_nodes {
+        for node_id in self.get_output_nodes() {
             self.node_status[node_id].is_output_node = true;
         }
     }
 
-    pub fn has_finished(&self) -> bool {
+    pub fn has_ended(&self) -> bool {
         self.has_completed_succesfully() || self.has_failed()
     }
 
@@ -183,10 +182,55 @@ impl Workflow {
         Ok(())
     }
 
+    async fn load_run_status(&mut self, run_id: u64) -> Result<()> {
+        let mut conn = APP.get_db_connection().await?;
+        let results: Vec<(usize,String)> = "SELECT `uuid`,`node_id` FROM `file` WHERE `run_id`=?"
+            .with((run_id,))
+            .map(&mut conn, |(uuid,node_id)|(node_id,uuid))
+            .await?;
+        for (node_id,uuid) in results {
+            let ns = self.node_status.iter_mut().filter(|ns|ns.node_id==node_id).next().ok_or_else(||anyhow!("More nodes in files that in node_status for run {run_id}"))?;
+            ns.uuid = uuid;
+            ns.status = WorkflowNodeStatusValue::DONE;
+        }
+
+        // Delete files and reset status of nodes that are dependent on unfinished nodes
+        let mut remove_uuids = vec![];
+        loop {
+            let done: Vec<usize> = self.node_status.iter().filter(|ns|ns.status==WorkflowNodeStatusValue::DONE).map(|ns|ns.node_id).collect();
+            let todo: Vec<usize> = self.node_status.iter().filter(|ns|ns.status!=WorkflowNodeStatusValue::DONE).map(|ns|ns.node_id).collect();
+            let redo: Vec<usize> = self.edges.iter() // Edges
+                .filter(|edge|done.contains(&edge.target_node)) // where the target is done
+                .filter(|edge|todo.contains(&edge.source_node)) // but the source is nopt
+                .map(|edge|edge.target_node) // so the target needs to be re-done after the source was
+                .collect();
+            if redo.is_empty() {
+                break;
+            }
+            for ns in self.node_status.iter_mut().filter(|ns|redo.contains(&ns.node_id)) {
+                ns.status = WorkflowNodeStatusValue::WAITING;
+                remove_uuids.push(ns.uuid.to_owned());
+                ns.uuid = String::new();
+            }
+        }
+        if !remove_uuids.is_empty() {
+            for uuid in &remove_uuids {
+                let _ = APP.remove_uuid_file(uuid);
+            }
+            let mut conn = APP.get_db_connection().await?;
+            format!("DELETE FROM `file` WHERE `uuid` IN ('{}')",remove_uuids.join("','")).with(()).run(&mut conn).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn run(&mut self) -> Result<()> {
         // Create a run ID unless one is provided
         let run_id = match self.run_id {
-            Some(run_id) => run_id,
+            Some(run_id) => {
+                let _ = self.load_run_status(run_id).await?;
+                run_id
+            }
             None => {
                 let run_id = self.create_run().await?;
                 self.run_id = Some(run_id);
@@ -240,13 +284,10 @@ impl Workflow {
                 return Err(anyhow!("User cancelled run"));
             }
             for (node_id,uuid) in node_file {
-                let is_output_node = self.node_status.iter().filter(|ns|ns.node_id==node_id).map(|ns|ns.is_output_node).next();
-                let end_time = match is_output_node {
-                    Some(true) => "null",
-                    _ => "NOW() + INTERVAL 1 HOUR",
-                };
-                format!("INSERT INTO `file` (`uuid`,`expires`,`run_id`) VALUES (?,{end_time},?)")
-                    .with((uuid.to_owned(),run_id))
+                let is_output_node = self.node_status.iter().filter(|ns|ns.node_id==node_id).map(|ns|ns.is_output_node).next().unwrap_or(false);
+                let end_time = if is_output_node { "null" } else { "NOW() + INTERVAL 1 HOUR" };
+                format!("INSERT INTO `file` (`uuid`,`expires`,`run_id`,`node_id`,`is_output`) VALUES (?,{end_time},?,?,?)")
+                    .with((uuid.to_owned(),run_id,node_id,is_output_node))
                     .run(&mut conn)
                     .await?;
                 self.node_status[node_id].uuid = uuid;
