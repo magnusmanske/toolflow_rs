@@ -9,6 +9,19 @@ pub enum WorkflowNodeStatusValue {
     RUNNING,
     DONE,
     FAILED,
+    CANCEL,
+}
+
+impl WorkflowNodeStatusValue {
+    pub fn as_str(&self) -> &str {
+        match self {
+            WorkflowNodeStatusValue::WAITING => "WAIT",
+            WorkflowNodeStatusValue::RUNNING => "RUN",
+            WorkflowNodeStatusValue::DONE => "DONE",
+            WorkflowNodeStatusValue::FAILED => "FAIL",
+            WorkflowNodeStatusValue::CANCEL => "CANCEL",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,10 +44,6 @@ impl WorkflowNodeStatus {
 
     pub fn uuid(&self) -> &str {
         &self.uuid
-    }
-
-    pub fn status(&self) -> WorkflowNodeStatusValue {
-        self.status.to_owned()
     }
 
     pub fn is_done(&self) -> bool {
@@ -113,7 +122,7 @@ impl WorkflowRun {
     }
 
     async fn create_new_id(&mut self) -> Result<()> {
-        let id = format!("INSERT INTO `run` (`status`,`workflow_id`,`ts_created`,`ts_last`,`nodes_total`) VALUES ('RUN',{},NOW(),NOW(),{})",self.workflow_id,self.nodes_total)
+        let id = format!("INSERT INTO `run` (`status`,`workflow_id`,`ts_created`,`ts_last`,`nodes_total`) VALUES ('{}',{},NOW(),NOW(),{})",WorkflowNodeStatusValue::RUNNING.as_str(),self.workflow_id,self.nodes_total)
             .with(())
             .run(APP.get_db_connection().await?)
             .await?
@@ -191,18 +200,18 @@ impl WorkflowRun {
 
     pub async fn is_cancelled(&mut self, conn: &mut Conn) -> Result<bool> {
         let run_id = self.id.ok_or_else(||anyhow!("WorkflowRun::is_cancelled: No ID set"))?;
-        Ok(!"SELECT `id` FROM `run` WHERE `id`=? AND `status`='CANCEL'"
-            .with((run_id,))
+        Ok(!"SELECT `id` FROM `run` WHERE `id`=? AND `status`=?"
+            .with((run_id,WorkflowNodeStatusValue::CANCEL.as_str()))
             .map(conn, |id: u64| id)
             .await?
             .is_empty())
     }
 
-    pub async fn update_status(&self, status: &str, conn: &mut Conn) -> Result<()> {
+    pub async fn update_status(&self, status: WorkflowNodeStatusValue, conn: &mut Conn) -> Result<()> {
         let run_id = self.id.ok_or_else(||anyhow!("WorkflowRun::is_cancelled: No ID set"))?;
         let nodes_done = self.node_status.iter().filter(|ns|ns.status==WorkflowNodeStatusValue::DONE).count();
         "UPDATE `run` SET `status`=?,`nodes_done`=? WHERE `id`=?"
-            .with((status,nodes_done,run_id))
+            .with((status.as_str(),nodes_done,run_id))
             .run(conn)
             .await?;
         Ok(())

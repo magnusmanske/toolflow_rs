@@ -3,7 +3,7 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
-use crate::{APP, workflow_run::WorkflowRun, workflow_node::WorkflowNode};
+use crate::{APP, workflow_run::{WorkflowRun, WorkflowNodeStatusValue}, workflow_node::WorkflowNode};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInput {
@@ -80,7 +80,7 @@ impl Workflow {
             let results = join_all(futures).await;
             if let Some(error_result) = results.iter().filter(|r|r.is_err()).next() {
                 if let Err(e) = error_result {
-                    self.run.update_status("FAIL", &mut APP.get_db_connection().await?).await?;
+                    self.run.update_status(WorkflowNodeStatusValue::FAILED, &mut APP.get_db_connection().await?).await?;
                     return Err(anyhow!(e.to_string()));
                 }
             }
@@ -104,10 +104,10 @@ impl Workflow {
                     .await?;
                 self.run.get_node_status_mut(node_id).done_with_uuid(&uuid);
             }
-            self.run.update_status("RUN", &mut conn).await?;
+            self.run.update_status(WorkflowNodeStatusValue::RUNNING, &mut conn).await?;
         }
 
-        self.run.update_status("DONE", &mut APP.get_db_connection().await?).await?;
+        self.run.update_status(WorkflowNodeStatusValue::DONE, &mut APP.get_db_connection().await?).await?;
 
         Ok(())
     }
