@@ -92,97 +92,61 @@ pub struct WorkflowEdge {
     pub target_slot: usize,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Workflow {
-    #[serde(skip)]
-    pub id: usize,
-
-    pub nodes: Vec<WorkflowNode>,
-    pub edges: Vec<WorkflowEdge>,
-    
-    #[serde(skip)]
-    pub node_status: Vec<WorkflowNodeStatus>,
-    #[serde(skip)]
-    pub run_id: Option<u64>,
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct WorkflowRun {
+    workflow_id: usize,
+    nodes_total: usize,
+    id: Option<u64>,
+    node_status: Vec<WorkflowNodeStatus>,
 }
 
-impl Workflow {
-    pub fn new(nodes: Vec<WorkflowNode>, edges: Vec<WorkflowEdge>) -> Self {
-        let mut ret = Self {
-            id: 0,
-            nodes,
-            edges,
-            node_status: vec![],
-            run_id: None,
-        };
-        ret.reset();
+impl WorkflowRun {
+    pub fn new(workflow_id: usize, node_ids: Vec<usize>, output_node_ids: Vec<usize>) -> Self {
+        let mut ret = Self::default();
+        ret.workflow_id = workflow_id;
+        ret.nodes_total = node_ids.len();
+        ret.node_ids2status(&node_ids, &output_node_ids);
         ret
     }
 
-    pub async fn from_id(id: usize) -> Result<Self> {
-        let mut conn = APP.get_db_connection().await?;
-        let mut ret = format!("SELECT `json` FROM `workflow` WHERE `id`={id}")
-            .with(())
-            .map(&mut conn, |j:String| serde_json::from_str::<Self>(&j).unwrap())
-            .await?
-            .pop()
-            .ok_or_else(||anyhow!("No workflow with id {id}"))?;
-        ret.id = id;
-        ret.reset();
-        Ok(ret)
+    pub fn set_id(&mut self, id: u64) {
+        self.id = Some(id);
     }
 
-    pub fn reset(&mut self) {
-        self.node_status = self.nodes.iter()
-            .enumerate()
-            .map(|(node_id,_node)| WorkflowNodeStatus::new(node_id) )
+    fn node_ids2status(&mut self, node_ids: &Vec<usize>, output_node_ids: &Vec<usize>) {
+        self.node_status = node_ids.iter()
+            .map(|node_id| WorkflowNodeStatus::new(*node_id) )
             .collect();
 
-        for node_id in self.get_output_nodes() {
-            self.node_status[node_id].is_output_node = true;
+        for node_id in output_node_ids {
+            self.node_status[*node_id].is_output_node = true;
         }
     }
 
-    pub fn has_ended(&self) -> bool {
-        self.has_completed_succesfully() || self.has_failed()
-    }
-
-    pub fn has_failed(&self) -> bool {
-        self.node_status.iter().any(|node_status| node_status.status==WorkflowNodeStatusValue::FAILED)
-    }
-
-    pub fn has_completed_succesfully(&self) -> bool {
-        self.node_status.iter().any(|node_status| node_status.status==WorkflowNodeStatusValue::DONE)
-    }
-
-    async fn create_run(&self) -> Result<u64> {
-        let nodes_total = self.nodes.len();
-        format!("INSERT INTO `run` (`status`,`workflow_id`,`ts_created`,`ts_last`,`nodes_total`) VALUES ('RUN',{},NOW(),NOW(),{nodes_total})",self.id)
+    async fn create_new_id(&mut self) -> Result<()> {
+        let id = format!("INSERT INTO `run` (`status`,`workflow_id`,`ts_created`,`ts_last`,`nodes_total`) VALUES ('RUN',{},NOW(),NOW(),{})",self.workflow_id,self.nodes_total)
             .with(())
             .run(APP.get_db_connection().await?)
             .await?
             .last_insert_id()
-            .ok_or_else(||anyhow!("Can't create a run in the database for workflow {}",self.id))
-    }
-
-    async fn is_run_cancelled(&self, run_id: u64, conn: &mut Conn) -> Result<bool> {
-        Ok(!"SELECT `id` FROM `run` WHERE `id`=? AND `status`='CANCEL'"
-            .with((run_id,))
-            .map(conn, |id: u64| id)
-            .await?
-            .is_empty())
-    }
-
-    async fn update_run(&self, run_id: u64, status: &str, conn: &mut Conn) -> Result<()> {
-        let nodes_done = self.node_status.iter().filter(|ns|ns.status==WorkflowNodeStatusValue::DONE).count();
-        "UPDATE `run` SET `status`=?,`nodes_done`=? WHERE `id`=?"
-            .with((status,nodes_done,run_id))
-            .run(conn)
-            .await?;
+            .ok_or_else(||anyhow!("Can't create a run in the database for workflow {}",self.workflow_id))?;
+        self.id = Some(id);
         Ok(())
     }
 
-    async fn load_run_status(&mut self, run_id: u64) -> Result<()> {
+    pub async fn get_or_create_id(&mut self) -> Result<u64> {
+        match self.id {
+            Some(id) => Ok(id),
+            None => {
+                let _ = self.create_new_id().await?;
+                let id = self.id.ok_or_else(||anyhow!("Could not create a run ID for workflow {}",self.workflow_id))?;
+                Ok(id)
+            }
+        }
+    }
+
+    pub async fn load_status(&mut self, edges: Vec<WorkflowEdge>) -> Result<()> {
+        let run_id = self.get_or_create_id().await?;
         let mut conn = APP.get_db_connection().await?;
         let results: Vec<(usize,String)> = "SELECT `uuid`,`node_id` FROM `file` WHERE `run_id`=?"
             .with((run_id,))
@@ -199,7 +163,7 @@ impl Workflow {
         loop {
             let done: Vec<usize> = self.node_status.iter().filter(|ns|ns.status==WorkflowNodeStatusValue::DONE).map(|ns|ns.node_id).collect();
             let todo: Vec<usize> = self.node_status.iter().filter(|ns|ns.status!=WorkflowNodeStatusValue::DONE).map(|ns|ns.node_id).collect();
-            let redo: Vec<usize> = self.edges.iter() // Edges
+            let redo: Vec<usize> = edges.iter() // Edges
                 .filter(|edge|done.contains(&edge.target_node)) // where the target is done
                 .filter(|edge|todo.contains(&edge.source_node)) // but the source is nopt
                 .map(|edge|edge.target_node) // so the target needs to be re-done after the source was
@@ -224,20 +188,90 @@ impl Workflow {
         Ok(())
     }
 
-    pub async fn run(&mut self) -> Result<()> {
-        // Create a run ID unless one is provided
-        let run_id = match self.run_id {
-            Some(run_id) => {
-                let _ = self.load_run_status(run_id).await?;
-                run_id
-            }
-            None => {
-                let run_id = self.create_run().await?;
-                self.run_id = Some(run_id);
-                run_id
-            },
-        };
+    pub fn has_ended(&self) -> bool {
+        self.has_completed_succesfully() || self.has_failed()
+    }
 
+    pub fn has_failed(&self) -> bool {
+        self.node_status.iter().any(|node_status| node_status.status==WorkflowNodeStatusValue::FAILED)
+    }
+
+    pub fn has_completed_succesfully(&self) -> bool {
+        self.node_status.iter().any(|node_status| node_status.status==WorkflowNodeStatusValue::DONE)
+    }
+
+    pub async fn is_cancelled(&mut self, conn: &mut Conn) -> Result<bool> {
+        let run_id = self.id.ok_or_else(||anyhow!("WorkflowRun::is_cancelled: No ID set"))?;
+        Ok(!"SELECT `id` FROM `run` WHERE `id`=? AND `status`='CANCEL'"
+            .with((run_id,))
+            .map(conn, |id: u64| id)
+            .await?
+            .is_empty())
+    }
+
+    pub async fn update_status(&self, status: &str, conn: &mut Conn) -> Result<()> {
+        let run_id = self.id.ok_or_else(||anyhow!("WorkflowRun::is_cancelled: No ID set"))?;
+        let nodes_done = self.node_status.iter().filter(|ns|ns.status==WorkflowNodeStatusValue::DONE).count();
+        "UPDATE `run` SET `status`=?,`nodes_done`=? WHERE `id`=?"
+            .with((status,nodes_done,run_id))
+            .run(conn)
+            .await?;
+        Ok(())
+    }
+
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Workflow {
+    #[serde(skip)]
+    pub id: usize,
+
+    #[serde(skip)]
+    pub user_id: usize,
+
+    pub nodes: Vec<WorkflowNode>,
+    pub edges: Vec<WorkflowEdge>,
+
+    #[serde(skip)]
+    pub run: WorkflowRun,
+}
+
+impl Workflow {
+    pub fn new(nodes: Vec<WorkflowNode>, edges: Vec<WorkflowEdge>, user_id: usize) -> Self {
+        let mut ret = Self {
+            id: 0,
+            user_id,
+            nodes,
+            edges,
+            run: WorkflowRun::default(),
+            // node_status: vec![],
+        };
+        ret.create_run();
+        ret
+    }
+
+    pub async fn from_id(workflow_id: usize) -> Result<Self> {
+        let mut conn = APP.get_db_connection().await?;
+        let mut ret = format!("SELECT `json` FROM `workflow` WHERE `id`={workflow_id}")
+            .with(())
+            .map(&mut conn, |j:String| serde_json::from_str::<Self>(&j).unwrap())
+            .await?
+            .pop()
+            .ok_or_else(||anyhow!("No workflow with id {workflow_id}"))?;
+        ret.id = workflow_id;
+        ret.create_run();
+        Ok(ret)
+    }
+
+    fn create_run(&mut self) {
+        let node_ids = self.get_all_node_ids();
+        let output_node_ids = self.get_output_nodes();
+        self.run = WorkflowRun::new(0,node_ids, output_node_ids);
+    }
+
+    pub async fn run(&mut self) -> Result<()> {
+        let run_id = self.run.get_or_create_id().await?;
+        let _ = self.run.load_status(self.edges.to_owned()).await?;
         loop {
             // println!("{self:?}");
             let nodes_to_run = self.get_next_nodes_to_run();
@@ -247,7 +281,7 @@ impl Workflow {
 
             let inputs_tmp: Vec<_> = self.edges.iter()
                 .filter(|edge|nodes_to_run.contains(&edge.target_node))
-                .map(|edge|NodeInput{node_id: edge.target_node, uuid: self.node_status[edge.source_node].uuid.to_owned(), slot:edge.target_slot})
+                .map(|edge|NodeInput{node_id: edge.target_node, uuid: self.run.node_status[edge.source_node].uuid.to_owned(), slot:edge.target_slot})
                 .collect();
             let mut inputs: HashMap<usize,HashMap<usize,String>> = HashMap::new();
             for node_id in &nodes_to_run {
@@ -267,7 +301,7 @@ impl Workflow {
                 match error_result {
                     Ok(_) => {},
                     Err(e) => {
-                        self.update_run(run_id, "FAIL", &mut APP.get_db_connection().await?).await?;
+                        self.run.update_status("FAIL", &mut APP.get_db_connection().await?).await?;
                         return Err(anyhow!(e.to_string()));
                     }
                 }
@@ -280,30 +314,38 @@ impl Workflow {
                 .collect();
             
             let mut conn = APP.get_db_connection().await?;
-            if self.is_run_cancelled(run_id, &mut conn).await? {
+            if self.run.is_cancelled(&mut conn).await? {
                 return Err(anyhow!("User cancelled run"));
             }
             for (node_id,uuid) in node_file {
-                let is_output_node = self.node_status.iter().filter(|ns|ns.node_id==node_id).map(|ns|ns.is_output_node).next().unwrap_or(false);
+                let is_output_node = self.run.node_status.iter().filter(|ns|ns.node_id==node_id).map(|ns|ns.is_output_node).next().unwrap_or(false);
                 let end_time = if is_output_node { "null" } else { "NOW() + INTERVAL 1 HOUR" };
                 format!("INSERT INTO `file` (`uuid`,`expires`,`run_id`,`node_id`,`is_output`) VALUES (?,{end_time},?,?,?)")
                     .with((uuid.to_owned(),run_id,node_id,is_output_node))
                     .run(&mut conn)
                     .await?;
-                self.node_status[node_id].uuid = uuid;
-                self.node_status[node_id].status = WorkflowNodeStatusValue::DONE;
+                self.run.node_status[node_id].uuid = uuid;
+                self.run.node_status[node_id].status = WorkflowNodeStatusValue::DONE;
             }
-            self.update_run(run_id, "RUN", &mut conn).await?;
+            self.run.update_status("RUN", &mut conn).await?;
         }
 
-        self.update_run(run_id, "DONE", &mut APP.get_db_connection().await?).await?;
+        self.run.update_status("DONE", &mut APP.get_db_connection().await?).await?;
 
         Ok(())
     }
 
+    fn get_all_node_ids(&self) -> Vec<usize> {
+        self.nodes.iter()
+            .enumerate()
+            .map(|(id,_)|id)
+            .collect()
+    }
+
     fn get_output_nodes(&self) -> Vec<usize> {
-        self.node_status.iter()
-            .map(|ns|ns.node_id)
+        self.nodes.iter()
+            .enumerate()
+            .map(|(id,_)|id)
             .filter(|node_id| !self.edges.iter().any(|edge|edge.source_node==*node_id))
             .collect()
     }
@@ -311,12 +353,12 @@ impl Workflow {
     fn node_open_dependencies(&self, node_id: usize) -> usize {
         self.edges.iter()
             .filter(|edge| edge.target_node==node_id)
-            .filter(|edge| self.node_status[edge.source_node].status!=WorkflowNodeStatusValue::DONE)
+            .filter(|edge| self.run.node_status[edge.source_node].status!=WorkflowNodeStatusValue::DONE)
             .count()
     }
 
     pub fn get_next_nodes_to_run(&self) -> Vec<usize> {
-        self.node_status.iter()
+        self.run.node_status.iter()
             .filter(|node_status| node_status.status==WorkflowNodeStatusValue::WAITING)
             .filter(|node_status| self.node_open_dependencies(node_status.node_id)==0)
             .map(|node_status|node_status.node_id)
