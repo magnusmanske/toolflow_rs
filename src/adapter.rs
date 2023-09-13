@@ -55,19 +55,11 @@ impl Adapter for SparqlAdapter {
 
             let mut jsonl_row = vec![];
             for cm in &mapping.data {
-                if let Some((label,_)) = cm.mapping.get(0) {
-                    if let Some(col_num) = label2col_num.get(label) {
+                if let Some((source_label,element_name)) = cm.mapping.get(0) {
+                    if let Some(col_num) = label2col_num.get(source_label) {
                         if let Some(text) = row.get(*col_num) {
-                            let dc = match cm.header.kind {
-                                ColumnHeaderType::WikiPage(_) => {
-                                    let j = json!({"type":"wikidata_item","url":text});
-                                    DataCell::from_value(&j,&cm.header)
-                                },
-                                _ => {
-                                    let j = json!(text);
-                                    DataCell::from_value(&j,&cm.header)
-                                }
-                            };
+                            let j = json!(text);
+                            let dc = DataCell::from_value(&j,&cm.header, &element_name);
                             jsonl_row.push(dc);
                             continue;
                         }
@@ -114,13 +106,63 @@ impl Adapter for QuarryAdapter {
             };
             let mut jsonl_row = vec![];
             for cm in &mapping.data {
-                if let Some((label,_)) = cm.mapping.get(0) {
-                    if let Some(col_num) = label2col_num.get(label) {
+                if let Some((source_label,element_name)) = cm.mapping.get(0) {
+                    if let Some(col_num) = label2col_num.get(source_label) {
                         if let Some(value) = row.get(*col_num) {
-                            let dc = DataCell::from_value(value,&cm.header);
+                            let dc = DataCell::from_value(value,&cm.header, &element_name);
                             jsonl_row.push(dc);
                             continue;
                         }
+                    }
+                }
+                jsonl_row.push(None);
+            }
+            self.add_output_row(&json!{jsonl_row})?; // Output data row
+        }
+        Ok(self.file.uuid().as_ref().unwrap().to_string())
+    }
+}
+
+
+
+
+
+
+#[derive(Debug, Default)]
+pub struct PetScanAdapter {
+    file: DataFile,
+}
+
+#[async_trait]
+impl Adapter for PetScanAdapter {
+    fn writer(&mut self) -> Result<&mut BufWriter<File>> {
+        if !self.file.is_output_open() {
+            self.file.open_output_file()?;
+        }
+        self.file.writer()
+    }
+
+    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<String> {
+        let url = match source {
+            SourceId::PetScan(id) => format!("https://petscan.wmflabs.org/?psid={id}&format=json&output_compatability=quick_intersection"),
+            _ => return Err(anyhow!("Unsuitable source type for PetScan: {source:?}")),
+        };
+        let j: Value = reqwest::get(url).await?.json().await?;
+        
+        self.add_output_row(&json!{mapping.as_data_header()})?; // Output new header
+        for row in j["pages"].as_array().ok_or(anyhow!("JSON has no rows array"))? {
+            let row = match row.as_object() {
+                Some(row) => row,
+                None => continue, // Skip row
+            };
+            let mut jsonl_row = vec![];
+            for cm in &mapping.data {
+                if let Some((source_label,element_name)) = cm.mapping.get(0) {
+                    // TODO sub-elements like metadata.defaultsort/metadata.disambiguation
+                    if let Some(value) = row.get(source_label) {
+                        let dc = DataCell::from_value(value,&cm.header, &element_name);
+                        jsonl_row.push(dc);
+                        continue;
                     }
                 }
                 jsonl_row.push(None);

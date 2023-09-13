@@ -12,6 +12,23 @@ pub struct NodeInput {
     uuid: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub enum WorkflowState {
+    #[default]
+    DRAFT,
+    PUBLISHED,
+}
+
+impl WorkflowState {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "DRAFT" => Some(WorkflowState::DRAFT),
+            "PUBLISHED" => Some(WorkflowState::PUBLISHED),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowEdge {
     pub source_node: usize,
@@ -25,6 +42,9 @@ pub struct Workflow {
     pub edges: Vec<WorkflowEdge>,
 
     #[serde(skip)]
+    pub state: WorkflowState,
+
+    #[serde(skip)]
     pub id: usize,
 
     #[serde(skip)]
@@ -32,6 +52,9 @@ pub struct Workflow {
 
     #[serde(skip)]
     pub run: WorkflowRun,
+
+    #[serde(skip)]
+    name: String,
 }
 
 impl Workflow {
@@ -41,7 +64,9 @@ impl Workflow {
             user_id,
             nodes,
             edges,
+            state: WorkflowState::default(),
             run: WorkflowRun::default(),
+            name: String::default(),
         };
         ret.run = WorkflowRun::new(&ret);
         ret
@@ -49,13 +74,19 @@ impl Workflow {
 
     pub async fn from_id(workflow_id: usize) -> Result<Self> {
         let mut conn = APP.get_db_connection().await?;
-        let mut ret = format!("SELECT `json` FROM `workflow` WHERE `id`={workflow_id}")
+        let (name, mut ret,state) = format!("SELECT `name`,`json`,`state` FROM `workflow` WHERE `id`={workflow_id}")
             .with(())
-            .map(&mut conn, |j:String| serde_json::from_str::<Self>(&j).unwrap())
+            .map(&mut conn, |x:(String,String,String)| (
+                    x.0.to_owned(),
+                    serde_json::from_str::<Self>(&x.1).unwrap(),
+                    WorkflowState::from_str(&x.2).unwrap_or_default()
+                ) )
             .await?
             .pop()
             .ok_or_else(||anyhow!("No workflow with id {workflow_id}"))?;
         ret.id = workflow_id;
+        ret.name = name;
+        ret.state = state;
         ret.run = WorkflowRun::new(&ret);
         Ok(ret)
     }

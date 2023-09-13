@@ -26,34 +26,47 @@ pub enum DataCell {
 }
 
 impl DataCell {
-    pub fn from_value(value: &Value, col_header: &ColumnHeader) -> Option<Self> {
+    fn entity_from_url(url: &str) -> Option<(i64,String)> { // namespace_id, page_title
+        match RE_WIKIDATA_ITEM.captures_iter(url).next() {
+            Some(cap) => {
+                let title = cap[1].to_string();
+                let ns_id = match title.chars().next() {
+                    Some('Q') => 0,
+                    Some('P') => 120,
+                    _ => return None,
+                };
+                Some((ns_id,title))
+            },
+            None => None, // No match
+        }
+    }
+
+    pub fn from_value(value: &Value, col_header: &ColumnHeader, element_name: &str) -> Option<Self> {
         match &col_header.kind {
             ColumnHeaderType::PlainText => Some(Self::PlainText(value.as_str()?.to_string())),
             ColumnHeaderType::WikiPage(wiki_page) => {
                 let mut wiki_page = wiki_page.clone();
-                match value["type"].as_str() {
-                    Some("wikidata_item") => {
-                        match value["url"].as_str() {
-                            Some(url) => {
-                                match RE_WIKIDATA_ITEM.captures_iter(url).next() {
-                                    Some(cap) => {
-                                        wiki_page.title = Some(cap[1].to_string());
-                                        wiki_page.prefixed_title = Some(cap[1].to_string());
-                                    },
-                                    None => return None, // No match
+                match value.as_str() {
+                    Some(s) => {
+                        match element_name {
+                            "title" => wiki_page.title = Some(s.to_owned()),
+                            "prefixed_title" => wiki_page.prefixed_title = Some(s.to_owned()),
+                            "ns_prefix" => wiki_page.ns_prefix = Some(s.to_owned()),
+                            "ns_id" => wiki_page.ns_id = s.parse::<i64>().ok(),
+                            "page_id" => wiki_page.page_id = s.parse::<i64>().ok(),
+                            "wiki" => wiki_page.wiki = Some(s.to_owned()),
+                            "entity_url" => {
+                                if let Some((ns_id,title)) = Self::entity_from_url(s) {
+                                    wiki_page.ns_id = Some(ns_id);
+                                    wiki_page.title = Some(title.to_owned());
+                                    wiki_page.prefixed_title = Some(title.to_owned());
                                 }
                             }
-                            _ => return None, // Not a str
+                            _ => return None
                         }
-                    }
-                    _ => {
-                        match value.as_str() {
-                            Some(title) => {
-                                wiki_page.title = Some(title.to_owned());
-                            },
-                            None => todo!(),
-                        }
+
                     },
+                    None => todo!(),
                 }
                 Some(Self::WikiPage(wiki_page))
             },

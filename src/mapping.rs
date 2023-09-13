@@ -6,6 +6,7 @@ pub enum SourceId {
     QuarryQueryRun(u64),
     QuarryQueryLatest(u64),
     Sparql(String),
+    PetScan(u64),
 }
 
 

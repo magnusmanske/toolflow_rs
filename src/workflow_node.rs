@@ -1,13 +1,14 @@
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{mapping::{HeaderMapping, SourceId}, adapter::{QuarryAdapter, Adapter, SparqlAdapter}, APP};
+use crate::{mapping::{HeaderMapping, SourceId}, adapter::{QuarryAdapter, Adapter, SparqlAdapter, PetScanAdapter}, APP};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WorkflowNodeKind {
     Quarry,
     Sparql,
+    PetScan,
     Join,
 }
 
@@ -29,6 +30,10 @@ impl WorkflowNode {
             WorkflowNodeKind::Sparql => {
                 let sparql = self.param_string("sparql")?;
                 SparqlAdapter::default().source2file(&SourceId::Sparql(sparql), &self.header_mapping).await
+            },
+            WorkflowNodeKind::PetScan => {
+                let id = self.param_u64("psid")?;
+                PetScanAdapter::default().source2file(&&SourceId::PetScan(id), &self.header_mapping).await
             },
             WorkflowNodeKind::Join => {
                 let mode = self.param_string("mode")?;
