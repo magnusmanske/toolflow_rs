@@ -1,10 +1,10 @@
-use std::{fs::File, io::{Write, Seek}, collections::HashMap};
+use std::{fs::File, io::{Write, Seek}, collections::HashMap, thread, time};
 use anyhow::{Result, anyhow};
 use serde_json::json;
 use tempfile::*;
 use toolforge::pool::mysql_async::{prelude::*, Pool, Conn};
 
-use crate::{data_file::DataFile, data_header::DataCell};
+use crate::{data_file::{DataFile, DataFileDetails}, data_header::DataCell};
 
 pub const USER_AGENT: &'static str = toolforge::user_agent!("toolflow");
 const REQWEST_TIMEOUT: u64 = 60;
@@ -25,6 +25,18 @@ impl App {
 
     pub async fn get_db_connection(&self) -> Result<Conn> {
         Ok(self.pool.get_conn().await?)
+    }
+
+    pub fn hold_on(&self) {
+        thread::sleep(time::Duration::from_millis(500));
+    }
+
+    pub async fn find_next_waiting_run(&self, conn: &mut Conn) -> Option<(u64,usize)> { // (run_id,workflow_id)
+        "SELECT `id`,`workflow_id` FROM `run` WHERE `status`='WAIT' LIMIT 1"
+            .with(())
+            .map(conn, |(run_id,workflow_id)| (run_id,workflow_id) )
+            .await.ok()?
+            .pop()
     }
 
     pub async fn clear_old_files(&self) -> Result<()> {
@@ -99,7 +111,7 @@ impl App {
         }*/
     }
 
-    pub fn inner_join_on_key(&self, uuids: Vec<&str>, key: &str) -> Result<String> {
+    pub fn inner_join_on_key(&self, uuids: Vec<&str>, key: &str) -> Result<DataFileDetails> {
         if uuids.is_empty() {
             return Err(anyhow!("No UUIDs given to inner_join_on_key"));
         }
@@ -164,6 +176,6 @@ impl App {
             };
             output_file.write_json_row(&json!(row))?;
         }
-        Ok(output_file.uuid().as_ref().unwrap().to_string())
+        Ok(output_file.details())
     }
 }

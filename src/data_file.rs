@@ -7,6 +7,13 @@ use uuid::Uuid;
 use crate::APP;
 use crate::data_header::{DataHeader, DataCell};
 
+// This class is used for thread-/async-safe passing of key data
+#[derive(Default, Clone)]
+pub struct DataFileDetails {
+    pub uuid: String,
+    pub rows: usize,
+}
+
 #[derive(Default)]
 pub struct DataFile {
     reader: Option<BufReader<File>>,
@@ -14,6 +21,7 @@ pub struct DataFile {
     uuid: Option<String>,
     header: DataHeader,
     pub rows: Vec<Vec<DataCell>>,
+    row_counter: usize,
 }
 
 impl fmt::Debug for DataFile {
@@ -31,11 +39,31 @@ impl DataFile {
         ret
     }
 
+    pub fn new_output_file() -> Result<Self> {
+        let mut ret = Self::default();
+        ret.open_output_file()?;
+        Ok(ret)
+    }
+
+    pub fn details(&self) -> DataFileDetails {
+        DataFileDetails {
+            uuid: match &self.uuid {
+                Some(uuid) => uuid.to_owned(),
+                None => String::default(),
+            },
+            rows: self.row_counter,
+        }
+    }
+
     pub fn write_json_row(&mut self, v: &Value) -> Result<()> {
         let fh = self.writer()?;
-        fh.write(v.to_string().as_bytes())?;
-        fh.write(b"\n")?;
+        writeln!(fh,"{v}")?;
+        self.row_counter += 1;
         Ok(())
+    }
+
+    pub fn rows_in_file(&self) -> usize {
+        self.row_counter
     }
 
     pub fn open_output_file(&mut self) -> Result<()> {
@@ -45,6 +73,9 @@ impl DataFile {
     }
 
     pub fn open_named_output_file(&mut self, uuid: &str) -> Result<()> {
+        if self.is_output_open() {
+            return Ok(())
+        }
         self.uuid = Some(uuid.to_string());
         let path = self.path().expect("base name was just set, this should be impossible");
         let file_handle = File::create(path)?;

@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{mapping::{HeaderMapping, SourceId}, adapter::{QuarryAdapter, Adapter, SparqlAdapter, PetScanAdapter}, APP};
+use crate::{mapping::{HeaderMapping, SourceId}, adapter::{QuarryAdapter, Adapter, SparqlAdapter, PetScanAdapter}, APP, data_file::DataFileDetails};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,7 +21,7 @@ pub struct WorkflowNode {
 }
 
 impl WorkflowNode {
-    pub async fn run(&self, input: &HashMap<usize,String>) -> Result<String> {
+    pub async fn run(&self, input: &HashMap<usize,String>) -> Result<DataFileDetails> {
         match self.kind {
             WorkflowNodeKind::Quarry => {
                 let id = self.param_u64("query_id")?;

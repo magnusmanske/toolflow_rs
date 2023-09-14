@@ -3,7 +3,7 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
-use crate::{APP, workflow_run::{WorkflowRun, WorkflowNodeStatusValue}, workflow_node::WorkflowNode};
+use crate::{APP, workflow_run::{WorkflowRun, WorkflowNodeStatusValue}, workflow_node::WorkflowNode, data_file::DataFileDetails};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInput {
@@ -116,24 +116,24 @@ impl Workflow {
                 }
             }
 
-            let node_file: Vec<_> = results.into_iter()
+            let node_file: Vec<(usize,DataFileDetails)> = results.into_iter()
                 .filter_map(|r|r.ok()) // Already checked they are all OK
                 .enumerate()
-                .map(|(num,uuid)|(nodes_to_run[num],uuid))
+                .map(|(num,dfd)|(nodes_to_run[num],dfd)) // TODO FIXME
                 .collect();
             
             let mut conn = APP.get_db_connection().await?;
             if self.run.is_cancelled(&mut conn).await? {
                 return Err(anyhow!("User cancelled run"));
             }
-            for (node_id,uuid) in node_file {
+            for (node_id,dfd) in node_file {
                 let is_output_node = self.run.is_output_node(node_id);
                 let end_time = if is_output_node { "null" } else { "NOW() + INTERVAL 1 HOUR" };
-                format!("INSERT INTO `file` (`uuid`,`expires`,`run_id`,`node_id`,`is_output`) VALUES (?,{end_time},?,?,?)")
-                    .with((uuid.to_owned(),run_id,node_id,is_output_node))
+                format!("INSERT INTO `file` (`uuid`,`expires`,`run_id`,`node_id`,`is_output`,`rows`) VALUES (?,{end_time},?,?,?,?)")
+                    .with((dfd.uuid.to_owned(),run_id,node_id,is_output_node,dfd.rows))
                     .run(&mut conn)
                     .await?;
-                self.run.get_node_status_mut(node_id).done_with_uuid(&uuid);
+                self.run.get_node_status_mut(node_id).done_with_uuid(&dfd.uuid);
             }
             self.run.update_status(WorkflowNodeStatusValue::RUNNING, &mut conn).await?;
         }

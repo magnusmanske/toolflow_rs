@@ -1,42 +1,26 @@
-use std::io::{BufWriter, Write};
-use std::{fs::File, collections::HashMap};
+use std::collections::HashMap;
 use async_trait::async_trait;
 use anyhow::{anyhow, Result};
 use serde_json::{Value, json};
 
-use crate::data_file::DataFile;
+use crate::data_file::{DataFile, DataFileDetails};
 use crate::mapping::{HeaderMapping, SourceId};
 use crate::{data_header::*, APP};
 
 
 #[async_trait]
 pub trait Adapter {
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<String>;
-    fn writer(&mut self) -> Result<&mut BufWriter<File>>;
-    fn add_output_row(&mut self, v: &Value) -> Result<()> {
-        let fh = self.writer()?;
-        fh.write(v.to_string().as_bytes())?;
-        fh.write(b"\n")?;
-        Ok(())
-    }
+    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails>;
 }
 
 
 #[derive(Debug, Default)]
 pub struct SparqlAdapter {
-    file: DataFile,
 }
 
 #[async_trait]
 impl Adapter for SparqlAdapter {
-    fn writer(&mut self) -> Result<&mut BufWriter<File>> {
-        if !self.file.is_output_open() {
-            self.file.open_output_file()?;
-        }
-        self.file.writer()
-    }
-
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<String> {
+    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
         let sparql = match source {
             SourceId::Sparql(sparql) => sparql,
             _ => return Err(anyhow!("Unsuitable source type for SPARQL: {source:?}")),
@@ -45,8 +29,9 @@ impl Adapter for SparqlAdapter {
         let labels: Vec<String> = reader.headers()?.iter().map(|s|s.to_string()).collect();
         let label2col_num: HashMap<String,usize> = labels.into_iter().enumerate().map(|(colnum,header)|(header,colnum)).collect();
 
-        self.add_output_row(&json!{mapping.as_data_header()})?; // Output new header
-
+        let mut file = DataFile::new_output_file()?;
+        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
+        
         for result in reader.records() {
             let row = match result {
                 Ok(row) => row,
@@ -67,28 +52,20 @@ impl Adapter for SparqlAdapter {
                 }
                 jsonl_row.push(None);
             }
-            self.add_output_row(&json!{jsonl_row})?; // Output data row
+            file.write_json_row(&json!{jsonl_row})?; // Output data row
         }
-        Ok(self.file.uuid().as_ref().unwrap().to_string())
+        Ok(file.details())
     }
 }
 
 
 #[derive(Debug, Default)]
 pub struct QuarryAdapter {
-    file: DataFile,
 }
 
 #[async_trait]
 impl Adapter for QuarryAdapter {
-    fn writer(&mut self) -> Result<&mut BufWriter<File>> {
-        if !self.file.is_output_open() {
-            self.file.open_output_file()?;
-        }
-        self.file.writer()
-    }
-
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<String> {
+    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
         let url = match source {
             SourceId::QuarryQueryRun(id) => format!("https://quarry.wmcloud.org/run/{id}/output/0/json"),
             SourceId::QuarryQueryLatest(id) => format!("https://quarry.wmcloud.org/query/{id}/result/latest/0/json"),
@@ -98,7 +75,8 @@ impl Adapter for QuarryAdapter {
         let labels: Vec<String> = j["headers"].as_array().ok_or(anyhow!("JSON has no header array"))?.iter().map(|s|s.as_str().unwrap_or("").to_string()).collect();
         let label2col_num: HashMap<String,usize> = labels.into_iter().enumerate().map(|(colnum,header)|(header,colnum)).collect();
         
-        self.add_output_row(&json!{mapping.as_data_header()})?; // Output new header
+        let mut file = DataFile::new_output_file()?;
+        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
         for row in j["rows"].as_array().ok_or(anyhow!("JSON has no rows array"))? {
             let row = match row.as_array() {
                 Some(row) => row,
@@ -117,39 +95,29 @@ impl Adapter for QuarryAdapter {
                 }
                 jsonl_row.push(None);
             }
-            self.add_output_row(&json!{jsonl_row})?; // Output data row
+            file.write_json_row(&json!{jsonl_row})?; // Output data row
         }
-        Ok(self.file.uuid().as_ref().unwrap().to_string())
+        Ok(file.details())
     }
 }
-
-
-
 
 
 
 #[derive(Debug, Default)]
 pub struct PetScanAdapter {
-    file: DataFile,
 }
 
 #[async_trait]
 impl Adapter for PetScanAdapter {
-    fn writer(&mut self) -> Result<&mut BufWriter<File>> {
-        if !self.file.is_output_open() {
-            self.file.open_output_file()?;
-        }
-        self.file.writer()
-    }
-
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<String> {
+    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
         let url = match source {
             SourceId::PetScan(id) => format!("https://petscan.wmflabs.org/?psid={id}&format=json&output_compatability=quick_intersection"),
             _ => return Err(anyhow!("Unsuitable source type for PetScan: {source:?}")),
         };
         let j: Value = reqwest::get(url).await?.json().await?;
         
-        self.add_output_row(&json!{mapping.as_data_header()})?; // Output new header
+        let mut file = DataFile::new_output_file()?;
+        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
         for row in j["pages"].as_array().ok_or(anyhow!("JSON has no rows array"))? {
             let row = match row.as_object() {
                 Some(row) => row,
@@ -167,8 +135,8 @@ impl Adapter for PetScanAdapter {
                 }
                 jsonl_row.push(None);
             }
-            self.add_output_row(&json!{jsonl_row})?; // Output data row
+            file.write_json_row(&json!{jsonl_row})?; // Output data row
         }
-        Ok(self.file.uuid().as_ref().unwrap().to_string())
+        Ok(file.details())
     }
 }
