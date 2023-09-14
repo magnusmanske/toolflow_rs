@@ -1,3 +1,4 @@
+use serde_json::json;
 use toolforge::pool::mysql_async::{prelude::*, Conn};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -122,8 +123,9 @@ impl WorkflowRun {
     }
 
     async fn create_new_id(&mut self) -> Result<()> {
-        let id = format!("INSERT INTO `run` (`status`,`workflow_id`,`ts_created`,`ts_last`,`nodes_total`) VALUES ('{}',{},NOW(),NOW(),{})",WorkflowNodeStatusValue::RUNNING.as_str(),self.workflow_id,self.nodes_total)
-            .with(())
+        let details = json!(self.node_status).to_string();
+        let id = format!("INSERT INTO `run` (`status`,`workflow_id`,`ts_created`,`ts_last`,`nodes_total`,`details`) VALUES ('{}',{},NOW(),NOW(),{},?)",WorkflowNodeStatusValue::RUNNING.as_str(),self.workflow_id,self.nodes_total)
+            .with((details,))
             .run(APP.get_db_connection().await?)
             .await?
             .last_insert_id()
@@ -209,11 +211,13 @@ impl WorkflowRun {
 
     pub async fn update_status(&self, status: WorkflowNodeStatusValue, conn: &mut Conn) -> Result<()> {
         let run_id = self.id.ok_or_else(||anyhow!("WorkflowRun::is_cancelled: No ID set"))?;
+        let details = json!(self.node_status).to_string();
         let nodes_done = self.node_status.iter().filter(|ns|ns.status==WorkflowNodeStatusValue::DONE).count();
-        "UPDATE `run` SET `status`=?,`nodes_done`=? WHERE `id`=?"
-            .with((status.as_str(),nodes_done,run_id))
+        "UPDATE `run` SET `status`=?,`nodes_done`=?,`details`=? WHERE `id`=?"
+            .with((status.as_str(),nodes_done,&details,run_id))
             .run(conn)
             .await?;
+        println!("Workflow {} Run {:?}: {details}", self.workflow_id, self.id);
         Ok(())
     }
 

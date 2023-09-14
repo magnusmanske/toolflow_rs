@@ -49,6 +49,7 @@ async fn main() {
 ssh magnus@tools-login.wmflabs.org -L 3306:tools-db:3306 -N &
 
 toolforge jobs run --image tf-php74 --mem 3Gi --cpu 1 --continuous --command '/data/project/toolflow/toolflow_rs/run.sh' toolflow-server
+rm -f ~/toolflow-server.* ; toolforge jobs restart toolflow-server
 clear ; toolforge jobs list ; tail ~/toolflow-server.*
 
 */
