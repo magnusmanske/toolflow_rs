@@ -1,4 +1,4 @@
-use std::{fs::File, io::{Write, Seek}, collections::HashMap, thread, time};
+use std::{fs::File, io::{Write, Seek}, collections::HashMap, thread, time, env};
 use anyhow::{Result, anyhow};
 use serde_json::json;
 use tempfile::*;
@@ -71,7 +71,16 @@ impl App {
     }
 
     pub fn data_path(&self) -> &str {
-        "./tmp"
+        match env::current_dir() {
+            Ok(path) => {
+                if path.to_string_lossy().contains("/project/") {
+                    "/data/project/toolflow/data"
+                } else {
+                    "./tmp" // Local box
+                }
+            },
+            Err(_) => "./tmp",
+        }
     }
 
     pub fn reqwest_client() -> Result<reqwest::Client> {
