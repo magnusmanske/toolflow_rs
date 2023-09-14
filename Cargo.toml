@@ -1,0 +1,26 @@
+[package]
+name = "toolflow"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+serde_json = "^1"
+tokio = { version = "^1", features = ["full","rt-multi-thread"] }
+reqwest = { version = "^0.11", features = ["blocking", "cookies", "json", "gzip","deflate","brotli"] }
+futures = "^0.3"
+urlencoding = "^2"
+config = "^0.13"
+anyhow = "*"
+async-trait = "*"
+serde = "*"
+lazy_static = "^1"
+tempfile = "*"
+csv = "*"
+regex = "*"
+bzip2 = "*"
+#flate2 = "*"
+uuid = { version = "*", features = ["v4"] }
+#toolforge = { version = "*" , features = ["unstable-pool"] }
+toolforge = { git = "https://gitlab.wikimedia.org/repos/mwbot-rs/toolforge" , branch = "main" , features = ["unstable-pool"]  }
