@@ -7,6 +7,8 @@ pub enum SourceId {
     QuarryQueryLatest(u64),
     Sparql(String),
     PetScan(u64),
+    PagePile(u64),
+    AListBuildingTool((String,String)),
 }
 
 

@@ -1,12 +1,12 @@
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{mapping::{HeaderMapping, SourceId}, adapter::{QuarryAdapter, Adapter, SparqlAdapter, PetScanAdapter}, APP, data_file::DataFileDetails};
+use crate::{mapping::{HeaderMapping, SourceId}, adapter::{QuarryQueryAdapter, Adapter, SparqlAdapter, PetScanAdapter}, APP, data_file::DataFileDetails};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WorkflowNodeKind {
-    Quarry,
+    QuarryQuery,
     Sparql,
     PetScan,
     Join,
@@ -23,9 +23,9 @@ pub struct WorkflowNode {
 impl WorkflowNode {
     pub async fn run(&self, input: &HashMap<usize,String>) -> Result<DataFileDetails> {
         match self.kind {
-            WorkflowNodeKind::Quarry => {
-                let id = self.param_u64("query_id")?;
-                QuarryAdapter::default().source2file(&SourceId::QuarryQueryLatest(id), &self.header_mapping).await
+            WorkflowNodeKind::QuarryQuery => {
+                let id = self.param_u64("quarry_query_id")?;
+                QuarryQueryAdapter::default().source2file(&SourceId::QuarryQueryLatest(id), &self.header_mapping).await
             },
             WorkflowNodeKind::Sparql => {
                 let sparql = self.param_string("sparql")?;

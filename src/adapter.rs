@@ -7,6 +7,29 @@ use crate::data_file::{DataFile, DataFileDetails};
 use crate::mapping::{HeaderMapping, SourceId};
 use crate::{data_header::*, APP};
 
+/*
+To add a new adapter struct:
+- add IDs to SourceId in mapping.rs
+- add IDs to get_external_header in api.php
+- add HTML to node_editor.html template
+- add JS initial values to workflow.html new_node()
+*/
+
+/*
+Candidate tools:
+- https://xtools.wmcloud.org/pages (parse wikitext output)
+- https://ws-search.toolforge.org/ (needs HTML scraping?)
+- https://wp-trending.toolforge.org/
+- https://wikinearby.toolforge.org/ (via its API)
+- https://wikidata-todo.toolforge.org/user_edits.php
+- https://wikidata-todo.toolforge.org/wd_edit_stats.php
+- https://wikidata-todo.toolforge.org/wdq_image_feed.php
+- https://wikidata-todo.toolforge.org/sparql_rc.php
+- https://fist.toolforge.org/wd4wp/#/
+- https://wikidata-todo.toolforge.org/duplicity/#/
+
+*/
+
 
 #[async_trait]
 pub trait Adapter {
@@ -44,7 +67,7 @@ impl Adapter for SparqlAdapter {
                     if let Some(col_num) = label2col_num.get(source_label) {
                         if let Some(text) = row.get(*col_num) {
                             let j = json!(text);
-                            let dc = DataCell::from_value(&j,&cm.header, &element_name);
+                            let dc = DataCell::from_value(&j,&cm.header, &element_name).await;
                             jsonl_row.push(dc);
                             continue;
                         }
@@ -59,17 +82,18 @@ impl Adapter for SparqlAdapter {
 }
 
 
+// Latest result for a given query ID
 #[derive(Debug, Default)]
-pub struct QuarryAdapter {
+pub struct QuarryQueryAdapter {
 }
 
 #[async_trait]
-impl Adapter for QuarryAdapter {
+impl Adapter for QuarryQueryAdapter {
     async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
         let url = match source {
-            SourceId::QuarryQueryRun(id) => format!("https://quarry.wmcloud.org/run/{id}/output/0/json"),
+            // SourceId::QuarryQueryRun(id) => format!("https://quarry.wmcloud.org/run/{id}/output/0/json"),
             SourceId::QuarryQueryLatest(id) => format!("https://quarry.wmcloud.org/query/{id}/result/latest/0/json"),
-            _ => return Err(anyhow!("Unsuitable source type for Quarry: {source:?}")),
+            _ => return Err(anyhow!("Unsuitable source type for Quarry query: {source:?}")),
         };
         let j: Value = reqwest::get(url).await?.json().await?;
         let labels: Vec<String> = j["headers"].as_array().ok_or(anyhow!("JSON has no header array"))?.iter().map(|s|s.as_str().unwrap_or("").to_string()).collect();
@@ -87,7 +111,7 @@ impl Adapter for QuarryAdapter {
                 if let Some((source_label,element_name)) = cm.mapping.get(0) {
                     if let Some(col_num) = label2col_num.get(source_label) {
                         if let Some(value) = row.get(*col_num) {
-                            let dc = DataCell::from_value(value,&cm.header, &element_name);
+                            let dc = DataCell::from_value(value,&cm.header, &element_name).await;
                             jsonl_row.push(dc);
                             continue;
                         }
@@ -128,7 +152,7 @@ impl Adapter for PetScanAdapter {
                 if let Some((source_label,element_name)) = cm.mapping.get(0) {
                     // TODO sub-elements like metadata.defaultsort/metadata.disambiguation
                     if let Some(value) = row.get(source_label) {
-                        let dc = DataCell::from_value(value,&cm.header, &element_name);
+                        let dc = DataCell::from_value(value,&cm.header, &element_name).await;
                         jsonl_row.push(dc);
                         continue;
                     }
@@ -137,6 +161,100 @@ impl Adapter for PetScanAdapter {
             }
             file.write_json_row(&json!{jsonl_row})?; // Output data row
         }
+        Ok(file.details())
+    }
+}
+
+
+#[derive(Debug, Default)]
+pub struct PagePileAdapter {
+}
+
+#[async_trait]
+impl Adapter for PagePileAdapter {
+    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+        let url = match source {
+            SourceId::PagePile(id) => format!("https://pagepile.toolforge.org/api.php?id={id}&action=get_data&doit&format=json"),
+            _ => return Err(anyhow!("Unsuitable source type for PagePile: {source:?}")),
+        };
+        let j: Value = reqwest::get(url).await?.json().await?;
+        
+        let mut file = DataFile::new_output_file()?;
+        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
+
+        for page in j["pages"].as_array().ok_or(anyhow!("JSON has no rows array"))? {
+            let prefixed_title = match page.as_str() {
+                Some(prefixed_title) => prefixed_title,
+                None => continue, // Skip row
+            };
+
+            let mut jsonl_row = vec![];
+            for cm in &mapping.data {
+                if let Some((_source_label,element_name)) = cm.mapping.get(0) {
+                    let value = json!(prefixed_title);
+                    let dc = DataCell::from_value(&value,&cm.header, &element_name).await;
+                    jsonl_row.push(dc);
+                    continue;
+                }
+                jsonl_row.push(None);
+            }
+            file.write_json_row(&json!{jsonl_row})?; // Output data row
+        }
+
+        Ok(file.details())
+    }
+}
+
+
+
+#[derive(Debug, Default)]
+pub struct AListBuildingToolAdapter {
+}
+
+#[async_trait]
+impl Adapter for AListBuildingToolAdapter {
+    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+        let url = match source {
+            SourceId::AListBuildingTool((wiki,q)) => format!("https://a-list-bulding-tool.toolforge.org/API/?wiki_db={wiki}&QID={q}"),
+            _ => return Err(anyhow!("Unsuitable source type for AListBuildingTool: {source:?}")),
+        };
+        let j: Value = reqwest::get(url).await?.json().await?;
+        
+        let mut file = DataFile::new_output_file()?;
+        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
+
+        for entry in j.as_array().ok_or(anyhow!("JSON is not an array"))? {
+            let title = match entry.get("title") {
+                Some(title) => match title.as_str() {
+                    Some(title) => title,
+                    None => continue, // Skip row
+                }
+                None => continue, // Skip row
+            };
+            let qid = match entry.get("qid") {
+                Some(qid) => match qid.as_str() {
+                    Some(qid) => qid,
+                    None => continue, // Skip row
+                }
+                None => continue, // Skip row
+            };
+    
+            let mut jsonl_row = vec![];
+            for cm in &mapping.data {
+                for (source_label,element_name) in &cm.mapping {
+                    let text = match source_label.as_str() {
+                        "title" => title,
+                        "qid" => qid,
+                        _ => continue,
+                    };
+                    let j = json!(text);
+                    let dc = DataCell::from_value(&j,&cm.header, &element_name).await;
+                    jsonl_row.push(dc);
+                }
+            }
+            file.write_json_row(&json!{jsonl_row})?; // Output data row
+        }
+
         Ok(file.details())
     }
 }

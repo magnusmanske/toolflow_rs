@@ -41,7 +41,7 @@ impl DataCell {
         }
     }
 
-    pub fn from_value(value: &Value, col_header: &ColumnHeader, element_name: &str) -> Option<Self> {
+    pub async fn from_value(value: &Value, col_header: &ColumnHeader, element_name: &str) -> Option<Self> {
         match &col_header.kind {
             ColumnHeaderType::PlainText => Some(Self::PlainText(value.as_str()?.to_string())),
             ColumnHeaderType::WikiPage(wiki_page) => {
@@ -68,6 +68,7 @@ impl DataCell {
                     },
                     None => todo!(),
                 }
+                wiki_page.fill_missing().await;
                 Some(Self::WikiPage(wiki_page))
             },
             ColumnHeaderType::Int => Some(Self::Int(value.as_i64()?)),

@@ -1,16 +1,26 @@
 use std::{fs::File, io::{Write, Seek}, collections::HashMap, thread, time, env};
 use anyhow::{Result, anyhow};
-use serde_json::json;
+use mediawiki::api::Api;
+use regex::Regex;
+use serde_json::{json, Value};
 use tempfile::*;
 use toolforge::pool::mysql_async::{prelude::*, Pool, Conn};
+use tokio::sync::RwLock;
+use lazy_static::lazy_static;
 
 use crate::{data_file::{DataFile, DataFileDetails}, data_header::DataCell};
 
 pub const USER_AGENT: &'static str = toolforge::user_agent!("toolflow");
 const REQWEST_TIMEOUT: u64 = 60;
 
+lazy_static!{
+    static ref RE_WEBSERVER_WIKIPEDIA: Regex = Regex::new(r"^(.+)wiki$").expect("Regex error");
+    static ref RE_WEBSERVER_WIKI: Regex = Regex::new(r"^(.+)(wik.+)$").expect("Regex error");
+}
+
 pub struct App {
     pool: Pool,
+    site_matrix: RwLock<HashMap<String,Api>>,
 }
 
 impl App {
@@ -19,7 +29,8 @@ impl App {
             pool: Pool::new(toolforge::db::toolsdb("s53704__toolflow_p".to_string())
                 .expect("unable to load db config")
                 .to_string()
-                .as_str(),)
+                .as_str(),),
+            site_matrix: RwLock::new(HashMap::new()),
         }
     }
 
@@ -29,6 +40,49 @@ impl App {
 
     pub fn hold_on(&self) {
         thread::sleep(time::Duration::from_millis(500));
+    }
+
+    pub async fn get_namespace_name(&self, wiki: &str, nsid: i64) -> Option<String> {
+        let key = format!("{nsid}");
+        let site_info = self.get_site_info(wiki).await.ok()?;
+        Some(site_info["query"]["namespaces"][key]["*"].as_str()?.to_string())
+    }
+
+    async fn get_site_info(&self, wiki: &str) -> Result<Value> {
+        match self.site_matrix.read().await.get(wiki) {
+            Some(v) => return Ok(v.get_site_info().to_owned()),
+            None => {}
+        }
+        let mut sm = self.site_matrix.write().await;
+        let server = self.get_webserver_for_wiki(wiki).ok_or_else(||anyhow!("Could not find web server for {wiki}"))?;
+        let url = format!("https://{server}/w/api.php");
+        let api = Api::new(&url).await?;
+        let entry = sm.entry(wiki.to_string()).or_insert(api);
+        let ret = entry.get_site_info();
+        Ok(ret.to_owned())
+    }
+
+    fn get_webserver_for_wiki(&self, wiki: &str) -> Option<String> {
+        match wiki {
+            "commonswiki" => Some("commons.wikimedia.org".to_string()),
+            "wikidatawiki" => Some("www.wikidata.org".to_string()),
+            "specieswiki" => Some("species.wikimedia.org".to_string()),
+            "metawiki" => Some("meta.wikimedia.org".to_string()),
+            wiki => {
+                let wiki = wiki.replace("_","-");
+                if let Some(cap1) = RE_WEBSERVER_WIKIPEDIA.captures(&wiki) {
+                    if let Some(name) = cap1.get(1) {
+                        return Some(format!("{}.wikipedia.org",name.as_str()));
+                    }                    
+                }
+                if let Some(cap2) = RE_WEBSERVER_WIKI.captures(&wiki) {
+                    if let (Some(name),Some(domain)) = (cap2.get(1),cap2.get(2)) {
+                        return Some(format!("{}.{}.org",name.as_str(),domain.as_str()));
+                    }
+                }
+                None
+            }
+        }
     }
 
     pub async fn find_next_waiting_run(&self, conn: &mut Conn) -> Option<(u64,usize)> { // (run_id,workflow_id)

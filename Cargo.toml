@@ -24,3 +24,4 @@ bzip2 = "*"
 uuid = { version = "*", features = ["v4"] }
 #toolforge = { version = "*" , features = ["unstable-pool"] }
 toolforge = { git = "https://gitlab.wikimedia.org/repos/mwbot-rs/toolforge" , branch = "main" , features = ["unstable-pool"]  }
+mediawiki = "*"

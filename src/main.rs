@@ -29,9 +29,21 @@ async fn main() {
     loop {
         match APP.find_next_waiting_run(&mut conn).await {
             Some((run_id,workflow_id)) => {
-                let mut workflow = Workflow::from_id(workflow_id).await.unwrap();
+                let mut workflow = match Workflow::from_id(workflow_id).await {
+                    Ok(workflow) => workflow,
+                    Err(e) => {
+                        eprintln!("Cannot get workflow {workflow_id}: {e}");
+                        continue;
+                    }
+                };
                 workflow.run.set_id(run_id);
-                workflow.run.update_status(WorkflowNodeStatusValue::RUNNING, &mut conn).await.unwrap();
+                match workflow.run.update_status(WorkflowNodeStatusValue::RUNNING, &mut conn).await {
+                    Ok(_) => {},
+                    Err(e) => {
+                        eprintln!("Cannot update initial status: {e}");
+                        continue;
+                    }
+                }
                 println!("Starting workflow {workflow_id} run {run_id}");
                 tokio::spawn(async move {
                     println!("Started workflow {workflow_id} run {run_id}");
@@ -55,57 +67,3 @@ clear ; toolforge jobs list ; tail ~/toolflow-server.*
 */
 
 // rsync -azv /Users/mm6/rust/toolflow/tmp/* magnus@tools-login.wmflabs.org:/data/project/toolflow/data
-
-/*
-use serde_json::json;
-use mapping::HeaderMapping;
-use workflow::{Workflow, WorkflowNode, WorkflowNodeKind, WorkflowEdge};
-use crate::wiki_page::WikiPage;
-
-
-    let mut nodes = vec![];
-
-    // Quarry
-    let parameters = vec![("query_id","76272")]
-        .iter().map(|(k,v)|(k.to_string(),v.to_string())).collect();
-    let wiki_page = WikiPage::new_commons_category();
-    let header_mapping = HeaderMapping::default()
-        .add_wiki_page("taxon_name","commons_category",&wiki_page)
-        .add_plain_text("taxon_name","taxon_name")
-        .build();
-    let node = WorkflowNode { 
-        kind: WorkflowNodeKind::Quarry, 
-        parameters, 
-        header_mapping,
-    };
-    nodes.push(node);
-
-    // SPARQL
-    let parameters = vec![("sparql","SELECT ?q ?taxon_name { ?q wdt:P225 ?taxon_name ; wdt:P105 wd:Q7432 MINUS { ?q wdt:P18 [] } } LIMIT 50000")]
-        .iter().map(|(k,v)|(k.to_string(),v.to_string())).collect();
-    let mut header_mapping = HeaderMapping::default();
-    header_mapping.add_wikidata_item("q","item");
-    header_mapping.add_plain_text("taxon_name","taxon_name");
-    let node = WorkflowNode { 
-        kind: WorkflowNodeKind::Sparql, 
-        parameters, 
-        header_mapping
-    };
-    nodes.push(node);
-
-    let parameters = vec![("mode","inner_join_on_key"),("join_key","taxon_name")]
-        .iter().map(|(k,v)|(k.to_string(),v.to_string())).collect();
-    let node = WorkflowNode { 
-        kind: WorkflowNodeKind::Join,
-        parameters, 
-        header_mapping: HeaderMapping::default()
-    };
-    nodes.push(node);
-
-    let mut edges = vec![];
-    edges.push(WorkflowEdge { source_node: 0, target_node: 2, target_slot: 0 });
-    edges.push(WorkflowEdge { source_node: 1, target_node: 2, target_slot: 1 });
-
-    let mut workflow = Workflow::new(nodes, edges) ;
-    println!("!!\n{}\n!!",json!{workflow}.to_string());
-     */
