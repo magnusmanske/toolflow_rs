@@ -8,7 +8,7 @@ use crate::APP;
 use crate::data_header::{DataHeader, DataCell};
 
 // This class is used for thread-/async-safe passing of key data
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug)]
 pub struct DataFileDetails {
     pub uuid: String,
     pub rows: usize,
@@ -56,6 +56,11 @@ impl DataFile {
     }
 
     pub fn write_json_row(&mut self, v: &Value) -> Result<()> {
+        if let Some(a) = v.as_array() { // Do not output empty data rows
+            if a.is_empty() {
+                return Ok(());
+            }
+        }
         let fh = self.writer()?;
         writeln!(fh,"{v}")?;
         self.row_counter += 1;

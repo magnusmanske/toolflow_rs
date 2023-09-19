@@ -1,14 +1,17 @@
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{mapping::{HeaderMapping, SourceId}, adapter::{QuarryQueryAdapter, Adapter, SparqlAdapter, PetScanAdapter}, APP, data_file::DataFileDetails};
+use crate::{mapping::{HeaderMapping, SourceId}, adapter::{QuarryQueryAdapter, Adapter, SparqlAdapter, PetScanAdapter, PagePileAdapter, AListBuildingToolAdapter}, APP, data_file::DataFileDetails};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WorkflowNodeKind {
-    QuarryQuery,
+    QuarryQueryRun,
+    // QuarryQueryLatest,
     Sparql,
     PetScan,
+    PagePile,
+    AListBuildingTool,
     Join,
 }
 
@@ -23,7 +26,7 @@ pub struct WorkflowNode {
 impl WorkflowNode {
     pub async fn run(&self, input: &HashMap<usize,String>) -> Result<DataFileDetails> {
         match self.kind {
-            WorkflowNodeKind::QuarryQuery => {
+            WorkflowNodeKind::QuarryQueryRun => {
                 let id = self.param_u64("quarry_query_id")?;
                 QuarryQueryAdapter::default().source2file(&SourceId::QuarryQueryLatest(id), &self.header_mapping).await
             },
@@ -34,6 +37,16 @@ impl WorkflowNode {
             WorkflowNodeKind::PetScan => {
                 let id = self.param_u64("psid")?;
                 PetScanAdapter::default().source2file(&&SourceId::PetScan(id), &self.header_mapping).await
+            },
+            WorkflowNodeKind::PagePile => {
+                let id = self.param_u64("pagepile_id")?;
+                PagePileAdapter::default().source2file(&&SourceId::PagePile(id), &self.header_mapping).await
+            },
+            WorkflowNodeKind::AListBuildingTool => {
+                let wiki = self.param_string("wiki")?;
+                let qid = self.param_string("qid")?;
+                let id = (wiki,qid);
+                AListBuildingToolAdapter::default().source2file(&&SourceId::AListBuildingTool(id), &self.header_mapping).await
             },
             WorkflowNodeKind::Join => {
                 let mode = self.param_string("mode")?;

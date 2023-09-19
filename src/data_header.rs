@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::wiki_page::WikiPage;
 
 lazy_static! {
-    static ref RE_WIKIDATA_ITEM: Regex = Regex::new(r"^https?://www.wikidata.org/entity/(Q\d+)$").unwrap();
+    static ref RE_WIKIDATA_ITEM: Regex = Regex::new(r"^https?://www.wikidata.org/entity/(Q\d+)$").expect("RegEx fail");
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use anyhow::{anyhow, Result};
 use serde_json::{Value, json};
 
+use crate::app::App;
 use crate::data_file::{DataFile, DataFileDetails};
 use crate::mapping::{HeaderMapping, SourceId};
 use crate::{data_header::*, APP};
@@ -16,7 +17,7 @@ To add a new adapter struct:
 */
 
 /*
-Candidate tools:
+Candidate tools: (see also https://tool-watch.toolforge.org/ )
 - https://xtools.wmcloud.org/pages (parse wikitext output)
 - https://ws-search.toolforge.org/ (needs HTML scraping?)
 - https://wp-trending.toolforge.org/
@@ -27,7 +28,13 @@ Candidate tools:
 - https://wikidata-todo.toolforge.org/sparql_rc.php
 - https://fist.toolforge.org/wd4wp/#/
 - https://wikidata-todo.toolforge.org/duplicity/#/
-
+- https://whattodo.toolforge.org
+- https://checkwiki.toolforge.org/checkwiki.cgi
+- https://cil2.toolforge.org/
+- https://grep.toolforge.org/
+- https://nppbrowser.toolforge.org/
+- https://searchsbl.toolforge.org/
+- https://item-quality-evaluator.toolforge.org (to add scores)
 */
 
 
@@ -95,7 +102,7 @@ impl Adapter for QuarryQueryAdapter {
             SourceId::QuarryQueryLatest(id) => format!("https://quarry.wmcloud.org/query/{id}/result/latest/0/json"),
             _ => return Err(anyhow!("Unsuitable source type for Quarry query: {source:?}")),
         };
-        let j: Value = reqwest::get(url).await?.json().await?;
+        let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;        
         let labels: Vec<String> = j["headers"].as_array().ok_or(anyhow!("JSON has no header array"))?.iter().map(|s|s.as_str().unwrap_or("").to_string()).collect();
         let label2col_num: HashMap<String,usize> = labels.into_iter().enumerate().map(|(colnum,header)|(header,colnum)).collect();
         
@@ -135,10 +142,10 @@ pub struct PetScanAdapter {
 impl Adapter for PetScanAdapter {
     async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
         let url = match source {
-            SourceId::PetScan(id) => format!("https://petscan.wmflabs.org/?psid={id}&format=json&output_compatability=quick_intersection"),
+            SourceId::PetScan(id) => format!("https://petscan.wmflabs.org/?psid={id}&format=json&output_compatability=quick-intersection"),
             _ => return Err(anyhow!("Unsuitable source type for PetScan: {source:?}")),
         };
-        let j: Value = reqwest::get(url).await?.json().await?;
+        let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;
         
         let mut file = DataFile::new_output_file()?;
         file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
@@ -177,8 +184,7 @@ impl Adapter for PagePileAdapter {
             SourceId::PagePile(id) => format!("https://pagepile.toolforge.org/api.php?id={id}&action=get_data&doit&format=json"),
             _ => return Err(anyhow!("Unsuitable source type for PagePile: {source:?}")),
         };
-        let j: Value = reqwest::get(url).await?.json().await?;
-        
+        let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;        
         let mut file = DataFile::new_output_file()?;
         file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
 
@@ -218,7 +224,7 @@ impl Adapter for AListBuildingToolAdapter {
             SourceId::AListBuildingTool((wiki,q)) => format!("https://a-list-bulding-tool.toolforge.org/API/?wiki_db={wiki}&QID={q}"),
             _ => return Err(anyhow!("Unsuitable source type for AListBuildingTool: {source:?}")),
         };
-        let j: Value = reqwest::get(url).await?.json().await?;
+        let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;        
         
         let mut file = DataFile::new_output_file()?;
         file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
@@ -256,5 +262,41 @@ impl Adapter for AListBuildingToolAdapter {
         }
 
         Ok(file.details())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_adapter_pagepile() {
+        let hm = "{\"data\":[{\"header\":{\"kind\":{\"WikiPage\":{\"ns_id\":null,\"ns_prefix\":null,\"page_id\":null,\"prefixed_title\":null,\"title\":null,\"wiki\":\"dewiki\"}},\"name\":\"wiki_page\"},\"mapping\":[[\"page\",\"prefixed_title\"]]}]}";
+        let header_mapping: HeaderMapping = serde_json::from_str(hm).unwrap();
+        let id = 51805;
+        let df = PagePileAdapter::default().source2file(&&SourceId::PagePile(id), &header_mapping).await.unwrap();
+        assert_eq!(df.rows,1748);
+        APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
+    }
+
+
+    #[tokio::test]
+    async fn test_adapter_petscan() {
+        let hm = "{\"data\":[{\"header\":{\"kind\":{\"WikiPage\":{\"ns_id\":null,\"ns_prefix\":null,\"page_id\":null,\"prefixed_title\":null,\"title\":null,\"wiki\":\"enwiki\"}},\"name\":\"wiki_page\"},\"mapping\":[[\"page_title\",\"title\"],[\"page_namespace\",\"ns_id\"]]}]}";
+        let header_mapping: HeaderMapping = serde_json::from_str(hm).unwrap();
+        let id = 25951472;
+        let df = PetScanAdapter::default().source2file(&&&SourceId::PetScan(id), &header_mapping).await.unwrap();
+        assert_eq!(df.rows,2);
+        APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
+    }
+
+    #[tokio::test]
+    async fn test_adapter_alistbuildingtool() {
+        let hm = "{\"data\":[{\"header\":{\"kind\":{\"WikiPage\":{\"ns_id\":null,\"ns_prefix\":null,\"page_id\":null,\"prefixed_title\":null,\"title\":null,\"wiki\":\"enwiki\"}},\"name\":\"wiki_page\"},\"mapping\":[[\"title\",\"prefixed_title\"]]}]}";
+        let header_mapping: HeaderMapping = serde_json::from_str(hm).unwrap();
+        let id = ("enwiki".to_string(),"Q82069695".to_string());
+        let df = AListBuildingToolAdapter::default().source2file(&&&SourceId::AListBuildingTool(id), &header_mapping).await.unwrap();
+        assert!(df.rows>1);
+        APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
     }
 }

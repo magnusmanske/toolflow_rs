@@ -58,8 +58,8 @@ impl App {
         let url = format!("https://{server}/w/api.php");
         let api = Api::new(&url).await?;
         let entry = sm.entry(wiki.to_string()).or_insert(api);
-        let ret = entry.get_site_info();
-        Ok(ret.to_owned())
+        let ret = entry.get_site_info().to_owned();
+        Ok(ret)
     }
 
     fn get_webserver_for_wiki(&self, wiki: &str) -> Option<String> {
