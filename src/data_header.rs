@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::wiki_page::WikiPage;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ColumnHeaderType {
     PlainText,
     WikiPage(WikiPage),
@@ -10,13 +10,13 @@ pub enum ColumnHeaderType {
     Float,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ColumnHeader {
     pub name: String,
     pub kind: ColumnHeaderType,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct DataHeader {
     pub columns: Vec<ColumnHeader>
 }

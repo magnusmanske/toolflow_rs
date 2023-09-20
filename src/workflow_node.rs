@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::{QuarryQueryAdapter, Adapter, SparqlAdapter, PetScanAdapter, PagePileAdapter, AListBuildingToolAdapter}, APP, data_file::DataFileDetails};
+use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::{QuarryQueryAdapter, Adapter, SparqlAdapter, PetScanAdapter, PagePileAdapter, AListBuildingToolAdapter}, data_file::DataFileDetails, join::Join};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,7 +55,12 @@ impl WorkflowNode {
                     "inner_join_on_key" => {
                         let join_key = self.param_string("join_key")?;
                         let uuids: Vec<&str> = input.iter().map(|(_slot,uuid)|uuid.as_str()).collect();
-                        APP.inner_join_on_key(uuids,&join_key)
+                        Join::default().inner_join_on_key(uuids,&join_key)
+                    }
+                    "merge_unique" => {
+                        let join_key = self.param_string("join_key")?;
+                        let uuids: Vec<&str> = input.iter().map(|(_slot,uuid)|uuid.as_str()).collect();
+                        Join::default().merge_unique(uuids,&join_key)
                     }
                     other => Err(anyhow!("Unknown join mode '{other}'"))
                 }
