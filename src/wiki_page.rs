@@ -38,6 +38,21 @@ impl WikiPage {
 
         if let Some(wiki) = &self.wiki {
             if !wiki.is_empty() {
+                if self.ns_id.is_none() {
+                    if let Some(prefixed_title) = &self.prefixed_title {
+                        let mut parts: Vec<&str> = prefixed_title.split(':').collect();
+                        if parts.len()==1 {
+                            self.ns_id = Some(0);
+                        } else if parts.len()>1 {
+                            self.ns_id = APP.get_namespace_id(wiki,parts[0]).await;
+                        }
+                        if self.ns_id.is_some() {
+                            self.ns_prefix = Some(parts.remove(0).to_string());
+                            self.title = Some(parts.join(":"));
+                        }
+                    }
+                }
+
                 if self.ns_prefix.is_none() {
                     if let Some(ns_id) = self.ns_id {
                         if let Some(ns) = APP.get_namespace_name(wiki, ns_id).await {
@@ -85,7 +100,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_fill_missing() {
+    async fn test_fill_missing_generate_prefixed_title() {
+        // Main namespace
         let mut wp = WikiPage::default();
         wp.wiki = Some("wikidatawiki".to_string());
         wp.title = Some("Q12345".to_string());
@@ -93,12 +109,37 @@ mod tests {
         wp.fill_missing().await;
         assert_eq!(wp.prefixed_title,Some("Q12345".to_string()));
 
+        // Category namespace
         let mut wp = WikiPage::default();
         wp.wiki = Some("commonswiki".to_string());
         wp.title = Some("Foobar".to_string());
         wp.ns_id = Some(14);
         wp.fill_missing().await;
         assert_eq!(wp.prefixed_title,Some("Category:Foobar".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_fill_missing_generate_namespace_id() {
+        // Main namespace
+        let mut wp = WikiPage::default();
+        wp.wiki = Some("dewiki".to_string());
+        wp.prefixed_title = Some("AGEB".to_string());
+        wp.fill_missing().await;
+        assert_eq!(wp.ns_id,Some(0));
+
+        // Local namespace
+        let mut wp = WikiPage::default();
+        wp.wiki = Some("dewiki".to_string());
+        wp.prefixed_title = Some("Kategorie:AGEB".to_string());
+        wp.fill_missing().await;
+        assert_eq!(wp.ns_id,Some(14));
+
+        // Canonical namespace
+        let mut wp = WikiPage::default();
+        wp.wiki = Some("dewiki".to_string());
+        wp.prefixed_title = Some("Category:AGEB".to_string());
+        wp.fill_missing().await;
+        assert_eq!(wp.ns_id,Some(14));
 
     }
 }

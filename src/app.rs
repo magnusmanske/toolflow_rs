@@ -42,6 +42,24 @@ impl App {
         thread::sleep(time::Duration::from_millis(500));
     }
 
+    fn to_compare(&self, s: &str) -> String {
+        s.to_lowercase().replace(' ',"_")
+    }
+
+    pub async fn get_namespace_id(&self, wiki: &str, ns: &str) -> Option<i64> {
+        let ns_to_compare = self.to_compare(ns);
+        let site_info = self.get_site_info(wiki).await.ok()?;
+        let si = site_info["query"]["namespaces"].as_object()?;
+        si.iter()
+            .map(|(_ns_id,v)| (v["id"].as_i64(),v["*"].as_str())) // Local namesapces
+            .chain(si.iter().map(|(_ns_id,v)| (v["id"].as_i64(),v["canonical"].as_str()))) // Adding canonical namespaces
+            .filter(|(ns_id,ns_name)|ns_id.is_some()&&ns_name.is_some())
+            .map(|(ns_id,ns_name)|(ns_id.unwrap(),ns_name.unwrap()))
+            .filter(|(_ns_id,ns_name)| self.to_compare(ns_name)==ns_to_compare)
+            .map(|(ns_id,_ns_name)|ns_id)
+            .next()
+    }
+
     pub async fn get_namespace_name(&self, wiki: &str, nsid: i64) -> Option<String> {
         let key = format!("{nsid}");
         let site_info = self.get_site_info(wiki).await.ok()?;

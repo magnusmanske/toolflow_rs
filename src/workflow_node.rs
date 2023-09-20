@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+use serde_json::Value;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::{QuarryQueryAdapter, Adapter, SparqlAdapter, PetScanAdapter, PagePileAdapter, AListBuildingToolAdapter}, APP, data_file::DataFileDetails};
@@ -16,16 +17,16 @@ pub enum WorkflowNodeKind {
     Filter,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkflowNode {
     pub kind: WorkflowNodeKind,
-    pub parameters: HashMap<String,String>,
+    pub parameters: HashMap<String,Value>,
     pub header_mapping: HeaderMapping,
 }
 
 impl WorkflowNode {
     pub async fn run(&self, input: &HashMap<usize,String>) -> Result<DataFileDetails> {
+        println!("{:?}",&self.parameters);
         match self.kind {
             WorkflowNodeKind::QuarryQueryRun => {
                 let id = self.param_u64("quarry_query_id")?;
@@ -61,13 +62,13 @@ impl WorkflowNode {
                 }
             },
             WorkflowNodeKind::Filter => {
-                let operator = self.param_string("value").unwrap_or_default();
+                let operator = self.param("operator")?;
                 let filter = Filter {
                     key: self.param_string("key")?,
-                    subkey: self.param_string("join_key").ok(),
-                    operator: serde_json::from_str(&operator)?,
+                    subkey: self.param_string("subkey").ok(),
+                    operator: serde_json::from_str(&operator.to_string()).map_err(|_|anyhow!("Invaid operator {operator}"))?,
                     value: self.param_string("value")?,
-                    remove_matching: self.param_bool("remove_matching")?,
+                    remove_matching: self.param_bool("remove_matching").unwrap_or(false),
                 };
                 let uuids: Vec<&str> = input.iter().map(|(_slot,uuid)|uuid.as_str()).collect();
                 match uuids.len() {
@@ -79,15 +80,21 @@ impl WorkflowNode {
         }
     }
 
+    fn param(&self, key: &str) -> Result<&Value> {
+        self.parameters.get(key).ok_or_else(||anyhow!("Parameter '{key}' not found"))
+    }
+
     fn param_string(&self, key: &str) -> Result<String> {
-        self.parameters.get(key).map(|s|s.to_owned()).ok_or_else(||anyhow!("Parameter '{key}' not found"))
+        self.param(key)?.as_str().map(|s|s.to_string()).ok_or_else(||anyhow!("Parameter '{key}' not found"))
     }
 
     fn param_u64(&self, key: &str) -> Result<u64> {
-        Ok(self.parameters.get(key).ok_or_else(||anyhow!("Parameter '{key}' not found"))?.parse::<u64>()?)
+        let ret = self.param(key)?.as_str().map(|s|s.parse::<u64>().ok());
+        let ret = ret.ok_or_else(||anyhow!("Parameter '{key}' not a str"))?;
+        ret.ok_or_else(||anyhow!("Parameter '{key}' not a u64"))
     }
 
     fn param_bool(&self, key: &str) -> Result<bool> {
-        Ok(self.parameters.get(key).ok_or_else(||anyhow!("Parameter '{key}' not found"))?.parse::<bool>()?)
+        self.param(key)?.as_bool().ok_or_else(||anyhow!("Parameter '{key}' not a boolean"))
     }
 }
