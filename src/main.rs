@@ -40,12 +40,9 @@ async fn main() {
                     }
                 };
                 workflow.run.set_id(run_id);
-                match workflow.run.update_status(WorkflowNodeStatusValue::RUNNING, &mut conn).await {
-                    Ok(_) => {},
-                    Err(e) => {
-                        eprintln!("Cannot update initial status: {e}");
-                        continue;
-                    }
+                if let Err(e) = workflow.run.update_status(WorkflowNodeStatusValue::RUNNING, &mut conn).await {
+                    eprintln!("Cannot update initial status: {e}");
+                    continue;
                 }
                 println!("Starting workflow {workflow_id} run {run_id}");
                 tokio::spawn(async move {

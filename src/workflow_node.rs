@@ -7,8 +7,8 @@ use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::{Quarry
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum WorkflowNodeKind {
-    QuarryQueryRun,
-    // QuarryQueryLatest,
+    // QuarryQueryRun,
+    QuarryQueryLatest,
     Sparql,
     PetScan,
     PagePile,
@@ -27,7 +27,7 @@ pub struct WorkflowNode {
 impl WorkflowNode {
     pub async fn run(&self, input: &HashMap<usize,String>) -> Result<DataFileDetails> {
         match self.kind {
-            WorkflowNodeKind::QuarryQueryRun => {
+            WorkflowNodeKind::QuarryQueryLatest => {
                 let id = self.param_u64("quarry_query_id")?;
                 QuarryQueryAdapter::default().source2file(&SourceId::QuarryQueryLatest(id), &self.header_mapping).await
             },

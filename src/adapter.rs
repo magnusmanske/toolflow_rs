@@ -99,7 +99,6 @@ pub struct QuarryQueryAdapter {
 impl Adapter for QuarryQueryAdapter {
     async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
         let url = match source {
-            // SourceId::QuarryQueryRun(id) => format!("https://quarry.wmcloud.org/run/{id}/output/0/json"),
             SourceId::QuarryQueryLatest(id) => format!("https://quarry.wmcloud.org/query/{id}/result/latest/0/json"),
             _ => return Err(anyhow!("Unsuitable source type for Quarry query: {source:?}")),
         };
