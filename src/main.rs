@@ -8,6 +8,8 @@ pub mod data_file;
 pub mod wiki_page;
 pub mod mapping;
 pub mod adapter;
+pub mod filter;
+pub mod data_cell;
 pub mod data_header;
 pub mod workflow;
 pub mod workflow_node;

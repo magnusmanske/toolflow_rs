@@ -5,7 +5,8 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use uuid::Uuid;
 use crate::APP;
-use crate::data_header::{DataHeader, DataCell};
+use crate::data_cell::DataCell;
+use crate::data_header::DataHeader;
 
 // This class is used for thread-/async-safe passing of key data
 #[derive(Default, Clone, Debug)]

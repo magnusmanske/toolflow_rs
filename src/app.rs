@@ -8,7 +8,7 @@ use toolforge::pool::mysql_async::{prelude::*, Pool, Conn};
 use tokio::sync::RwLock;
 use lazy_static::lazy_static;
 
-use crate::{data_file::{DataFile, DataFileDetails}, data_header::DataCell};
+use crate::{data_file::{DataFile, DataFileDetails}, data_cell::DataCell};
 
 pub const USER_AGENT: &'static str = toolforge::user_agent!("toolflow");
 const REQWEST_TIMEOUT: u64 = 60;
@@ -127,7 +127,9 @@ impl App {
     pub fn data_path(&self) -> &str {
         match env::current_dir() {
             Ok(path) => {
-                if path.to_string_lossy().contains("/project/") {
+                if cfg!(test) {
+                    return "./test_data" // Testing
+                } else if path.to_string_lossy().contains("/project/") {
                     "/data/project/toolflow/data"
                 } else {
                     "./tmp" // Local box

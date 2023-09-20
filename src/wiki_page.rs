@@ -12,6 +12,13 @@ pub struct WikiPage {
     pub wiki: Option<String>,
 }
 
+impl PartialEq for WikiPage {
+    fn eq(&self, other: &Self) -> bool {
+        // TODO check, make more elegant?
+        self.wiki==other.wiki && self.prefixed_title==other.prefixed_title
+    }
+}
+
 impl WikiPage {
     pub fn new_wikidata_item() -> Self {
         Self { title: None, prefixed_title: None, ns_id: Some(0), page_id: None, ns_prefix: None, wiki: Some("wikidatawiki".to_string()) }
@@ -22,20 +29,25 @@ impl WikiPage {
     }
 
     pub async fn fill_missing(&mut self) {
-        let wiki = match &self.wiki {
-            Some(wiki) => wiki,
-            None => return,
-        };
-        if wiki.is_empty() { // Paranoia
-            return;
+        if let Some(title) = &mut self.title {
+            *title = title.replace(' ',"_");
         }
-        if self.ns_prefix.is_none() {
-            if let Some(ns_id) = self.ns_id {
-                if let Some(ns) = APP.get_namespace_name(wiki, ns_id).await {
-                    self.ns_prefix = Some(ns)
+        if let Some(prefixed_title) = &mut self.prefixed_title {
+            *prefixed_title = prefixed_title.replace(' ',"_");
+        }
+
+        if let Some(wiki) = &self.wiki {
+            if !wiki.is_empty() {
+                if self.ns_prefix.is_none() {
+                    if let Some(ns_id) = self.ns_id {
+                        if let Some(ns) = APP.get_namespace_name(wiki, ns_id).await {
+                            self.ns_prefix = Some(ns)
+                        }
+                    }
                 }
             }
-        }
+        };
+        
         if self.prefixed_title.is_none() {
             if let Some(title) = &self.title {
                 if let Some(ns_prefix) = &self.ns_prefix {

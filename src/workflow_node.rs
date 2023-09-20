@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{mapping::{HeaderMapping, SourceId}, adapter::{QuarryQueryAdapter, Adapter, SparqlAdapter, PetScanAdapter, PagePileAdapter, AListBuildingToolAdapter}, APP, data_file::DataFileDetails};
+use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::{QuarryQueryAdapter, Adapter, SparqlAdapter, PetScanAdapter, PagePileAdapter, AListBuildingToolAdapter}, APP, data_file::DataFileDetails};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +13,7 @@ pub enum WorkflowNodeKind {
     PagePile,
     AListBuildingTool,
     Join,
+    Filter,
 }
 
 
@@ -58,7 +59,23 @@ impl WorkflowNode {
                     }
                     other => Err(anyhow!("Unknown join mode '{other}'"))
                 }
-            }
+            },
+            WorkflowNodeKind::Filter => {
+                let operator = self.param_string("value").unwrap_or_default();
+                let filter = Filter {
+                    key: self.param_string("key")?,
+                    subkey: self.param_string("join_key").ok(),
+                    operator: serde_json::from_str(&operator)?,
+                    value: self.param_string("value")?,
+                    remove_matching: self.param_bool("remove_matching")?,
+                };
+                let uuids: Vec<&str> = input.iter().map(|(_slot,uuid)|uuid.as_str()).collect();
+                match uuids.len() {
+                    0 => Err(anyhow!("Filter has no input")),
+                    1 => filter.process(&uuids[0]).await,
+                    other => Err(anyhow!("Filter has {other} inputs, should only have one")),
+                }
+            },
         }
     }
 
@@ -68,5 +85,9 @@ impl WorkflowNode {
 
     fn param_u64(&self, key: &str) -> Result<u64> {
         Ok(self.parameters.get(key).ok_or_else(||anyhow!("Parameter '{key}' not found"))?.parse::<u64>()?)
+    }
+
+    fn param_bool(&self, key: &str) -> Result<bool> {
+        Ok(self.parameters.get(key).ok_or_else(||anyhow!("Parameter '{key}' not found"))?.parse::<bool>()?)
     }
 }

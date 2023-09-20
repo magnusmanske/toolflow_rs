@@ -4,9 +4,10 @@ use anyhow::{anyhow, Result};
 use serde_json::{Value, json};
 
 use crate::app::App;
+use crate::data_cell::DataCell;
 use crate::data_file::{DataFile, DataFileDetails};
 use crate::mapping::{HeaderMapping, SourceId};
-use crate::{data_header::*, APP};
+use crate::APP;
 
 /*
 To add a new adapter struct:
