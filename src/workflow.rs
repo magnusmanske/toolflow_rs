@@ -95,7 +95,6 @@ impl Workflow {
         let run_id = self.run.get_or_create_id().await?;
         let _ = self.run.load_status().await?;
         loop {
-            // println!("{self:?}");
             let nodes_to_run = self.get_next_nodes_to_run();
             if nodes_to_run.is_empty() {
                 break;

@@ -26,7 +26,6 @@ pub struct WorkflowNode {
 
 impl WorkflowNode {
     pub async fn run(&self, input: &HashMap<usize,String>) -> Result<DataFileDetails> {
-        println!("{:?}",&self.parameters);
         match self.kind {
             WorkflowNodeKind::QuarryQueryRun => {
                 let id = self.param_u64("quarry_query_id")?;
