@@ -45,16 +45,23 @@ impl Join {
     pub fn merge_unique(&self, uuids: Vec<&str>, key: &str) -> Result<DataFileDetails> {
         let files = self.get_files_with_metadata(uuids)?;
         let mut output_file = DataFile::default();
-        let new_header = files[0].header().to_owned();
         output_file.open_output_file()?;
-        output_file.write_json_row(&json!(new_header))?;
+        let mut new_header = None;
         let mut had_key = HashSet::new();
         let first_uuid = files[0].uuid().to_owned();
         for mut file in files.into_iter() {
-            if new_header!=*file.header() {
+            file.load_header()?;
+            if new_header.is_none() {
+                new_header = Some(file.header().to_owned());
+                output_file.write_json_row(&json!(new_header))?;
+            } else if new_header!=Some(file.header().to_owned()) {
                 return Err(anyhow!("File {first_uuid:?} has a different header than {file:?}"));
             }
-            let key_col_num = new_header.get_col_num(key).ok_or(anyhow!("No key '{key} in file {}",file.path().unwrap()))?;
+            let key_col_num = match &new_header {
+                Some(x) => x.get_col_num(key).ok_or(anyhow!("No key '{key}' in file {}",file.path().unwrap()))?,
+                None => return Err(anyhow!("merge_unique header not initialized")),
+            };
+            
             loop {
                 let (row,key) = match self.read_row_and_key(&mut file, key_col_num) {
                     Some(x) => x,
@@ -80,7 +87,7 @@ impl Join {
         for mut file in data_files.into_iter() {
             file.load_header()?;
             let mut new_header = file.header().to_owned();
-            let key_col_num = new_header.get_col_num(key).ok_or(anyhow!("No key '{key} in file {}",file.path().unwrap()))?;
+            let key_col_num = new_header.get_col_num(key).ok_or(anyhow!("No key '{key}' in file {}",file.path().unwrap()))?;
             new_header.columns.remove(key_col_num);
             main_file.add_header(new_header);
 
