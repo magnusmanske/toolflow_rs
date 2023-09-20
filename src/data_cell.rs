@@ -36,6 +36,7 @@ impl PartialEq for DataCell {
 
 impl PartialOrd for DataCell {
     fn partial_cmp(&self, other: &DataCell) -> Option<Ordering> {
+        // println!("{self:?} <=> {other:?}");
         match (self,other) {
             (DataCell::Blank, DataCell::Blank) => Some(Ordering::Equal),
             (DataCell::Blank, _) => Some(Ordering::Less),

@@ -50,7 +50,7 @@ impl App {
         let ns_to_compare = self.to_compare(ns);
         let site_info = self.get_site_info(wiki).await.ok()?;
         let si = site_info["query"]["namespaces"].as_object()?;
-        si.iter()
+        Some(si.iter()
             .map(|(_ns_id,v)| (v["id"].as_i64(),v["*"].as_str())) // Local namesapces
             .chain(si.iter().map(|(_ns_id,v)| (v["id"].as_i64(),v["canonical"].as_str()))) // Adding canonical namespaces
             .filter(|(ns_id,ns_name)|ns_id.is_some()&&ns_name.is_some())
@@ -58,6 +58,7 @@ impl App {
             .filter(|(_ns_id,ns_name)| self.to_compare(ns_name)==ns_to_compare)
             .map(|(ns_id,_ns_name)|ns_id)
             .next()
+            .unwrap_or(0))
     }
 
     pub async fn get_namespace_name(&self, wiki: &str, nsid: i64) -> Option<String> {

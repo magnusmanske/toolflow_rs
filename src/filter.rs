@@ -104,7 +104,7 @@ mod tests {
     use crate::APP;
 
     #[tokio::test]
-    async fn test_filter_wikipage() {
+    async fn test_filter_wikipage_via_prefixed_title() {
         let uuid = "cb1e218e-421f-46b8-a77e-eac6799ce4e4";
         let filter = Filter {
             key: "wiki_page".to_string(), 
@@ -119,7 +119,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_filter_wikipage2() {
+    async fn test_filter_wikipage_via_namespace_id() {
         let uuid = "cb1e218e-421f-46b8-a77e-eac6799ce4e4";
         let mut filter = Filter {
             key: "wiki_page".to_string(), 

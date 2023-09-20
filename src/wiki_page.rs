@@ -127,6 +127,13 @@ mod tests {
         wp.fill_missing().await;
         assert_eq!(wp.ns_id,Some(0));
 
+        // Main namespace but with colon
+        let mut wp = WikiPage::default();
+        wp.wiki = Some("dewiki".to_string());
+        wp.prefixed_title = Some("Station_’70:_Call_in_Question_/_Live_Independence ".to_string());
+        wp.fill_missing().await;
+        assert_eq!(wp.ns_id,Some(0));
+
         // Local namespace
         let mut wp = WikiPage::default();
         wp.wiki = Some("dewiki".to_string());
@@ -140,6 +147,5 @@ mod tests {
         wp.prefixed_title = Some("Category:AGEB".to_string());
         wp.fill_missing().await;
         assert_eq!(wp.ns_id,Some(14));
-
     }
 }
