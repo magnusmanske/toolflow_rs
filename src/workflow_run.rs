@@ -31,11 +31,13 @@ pub struct WorkflowNodeStatus {
     status: WorkflowNodeStatusValue,
     uuid: String,
     is_output_node: bool,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 impl WorkflowNodeStatus {
     fn new(node_id: usize) -> Self {
-        Self  { node_id, status: WorkflowNodeStatusValue::WAITING, uuid: String::new() , is_output_node: false }
+        Self  { node_id, status: WorkflowNodeStatusValue::WAITING, uuid: String::new() , is_output_node: false , error: None }
     }
 
     pub fn done_with_uuid(&mut self, uuid: &str) {
@@ -45,6 +47,10 @@ impl WorkflowNodeStatus {
 
     pub fn uuid(&self) -> &str {
         &self.uuid
+    }
+
+    pub fn set_error(&mut self, error: Option<String>) {
+        self.error = error;
     }
 
     pub fn is_done(&self) -> bool {

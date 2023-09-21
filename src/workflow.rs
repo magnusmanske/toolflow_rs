@@ -108,6 +108,17 @@ impl Workflow {
 
             let futures: Vec<_> = nodes_to_run.iter().map(|node_id|self.nodes[*node_id].run(inputs.get(node_id).unwrap())).collect();
             let results = join_all(futures).await;
+
+            // Set error for all nodes
+            results.iter()
+                .zip(nodes_to_run.iter())
+                .for_each(|(result,node_id)| {
+                    if let Err(e) = result {
+                        self.run.get_node_status_mut(*node_id).set_error(Some(e.to_string()));
+                    }
+                });
+
+            // Fail on first error
             if let Some(error_result) = results.iter().filter(|r|r.is_err()).next() {
                 if let Err(e) = error_result {
                     self.run.update_status(WorkflowNodeStatusValue::FAILED, &mut APP.get_db_connection().await?).await?;

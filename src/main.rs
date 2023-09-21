@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use lazy_static::lazy_static;
 use app::App;
 use workflow::Workflow;
@@ -22,14 +24,26 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() {
-    let _ = APP.clear_old_files().await;
-
     let mut conn = match APP.get_db_connection().await {
         Ok(conn) => conn,
         Err(e) => panic!("{e}"),
     };
 
+    let _ = APP.clear_old_files().await;
+    let mut last_clear_time = SystemTime::now();
+
+
     loop {
+        match last_clear_time.elapsed() {
+            Ok(elapsed) => {
+                if elapsed.as_secs()>5*60 { // Every 5 minutes
+                    let _ = APP.clear_old_files().await;
+                    last_clear_time = SystemTime::now();
+                }
+            }
+            Err(_) => {},
+        }
+
         match APP.find_next_waiting_run(&mut conn).await {
             Some((run_id,workflow_id)) => {
                 let mut workflow = match Workflow::from_id(workflow_id).await {
