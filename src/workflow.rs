@@ -114,7 +114,7 @@ impl Workflow {
                 .zip(nodes_to_run.iter())
                 .for_each(|(result,node_id)| {
                     if let Err(e) = result {
-                        self.run.get_node_status_mut(*node_id).set_error(Some(e.to_string()));
+                        self.run.get_node_status_mut(*node_id).set_status(WorkflowNodeStatusValue::FAILED,Some(e.to_string()));
                     }
                 });
 

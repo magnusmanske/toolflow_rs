@@ -49,7 +49,8 @@ impl WorkflowNodeStatus {
         &self.uuid
     }
 
-    pub fn set_error(&mut self, error: Option<String>) {
+    pub fn set_status(&mut self, status: WorkflowNodeStatusValue, error: Option<String>) {
+        self.status = status;
         self.error = error;
     }
 
@@ -59,6 +60,10 @@ impl WorkflowNodeStatus {
 
     pub fn is_waiting(&self) -> bool {
         self.status == WorkflowNodeStatusValue::WAITING
+    }
+
+    pub fn is_failed(&self) -> bool {
+        self.status == WorkflowNodeStatusValue::FAILED
     }
 }
 
@@ -161,14 +166,14 @@ impl WorkflowRun {
         for (node_id,uuid) in results {
             let ns = self.node_status.iter_mut().filter(|ns|ns.node_id==node_id).next().ok_or_else(||anyhow!("More nodes in files that in node_status for run {run_id}"))?;
             ns.uuid = uuid;
-            ns.status = WorkflowNodeStatusValue::DONE;
+            ns.set_status(WorkflowNodeStatusValue::DONE,None);
         }
 
         // Delete files and reset status of nodes that are dependent on unfinished nodes
         let mut remove_uuids = vec![];
         loop {
-            let done: Vec<usize> = self.node_status.iter().filter(|ns|ns.status==WorkflowNodeStatusValue::DONE).map(|ns|ns.node_id).collect();
-            let todo: Vec<usize> = self.node_status.iter().filter(|ns|ns.status!=WorkflowNodeStatusValue::DONE).map(|ns|ns.node_id).collect();
+            let done: Vec<usize> = self.node_status.iter().filter(|ns|ns.is_done()).map(|ns|ns.node_id).collect();
+            let todo: Vec<usize> = self.node_status.iter().filter(|ns|!ns.is_done()).map(|ns|ns.node_id).collect();
             let redo: Vec<usize> = self.edges.iter() // Edges
                 .filter(|edge|done.contains(&edge.target_node)) // where the target is done
                 .filter(|edge|todo.contains(&edge.source_node)) // but the source is not
@@ -178,7 +183,7 @@ impl WorkflowRun {
                 break;
             }
             for ns in self.node_status.iter_mut().filter(|ns|redo.contains(&ns.node_id)) {
-                ns.status = WorkflowNodeStatusValue::WAITING;
+                ns.set_status(WorkflowNodeStatusValue::WAITING,None);
                 remove_uuids.push(ns.uuid.to_owned());
                 ns.uuid = String::new();
             }
@@ -199,11 +204,11 @@ impl WorkflowRun {
     }
 
     pub fn has_failed(&self) -> bool {
-        self.node_status.iter().any(|node_status| node_status.status==WorkflowNodeStatusValue::FAILED)
+        self.node_status.iter().any(|node_status| node_status.is_failed())
     }
 
     pub fn has_completed_succesfully(&self) -> bool {
-        self.node_status.iter().any(|node_status| node_status.status==WorkflowNodeStatusValue::DONE)
+        self.node_status.iter().any(|node_status| node_status.is_done())
     }
 
     pub async fn is_cancelled(&mut self, conn: &mut Conn) -> Result<bool> {
@@ -218,7 +223,7 @@ impl WorkflowRun {
     pub async fn update_status(&self, status: WorkflowNodeStatusValue, conn: &mut Conn) -> Result<()> {
         let run_id = self.id.ok_or_else(||anyhow!("WorkflowRun::is_cancelled: No ID set"))?;
         let details = json!(self.node_status).to_string();
-        let nodes_done = self.node_status.iter().filter(|ns|ns.status==WorkflowNodeStatusValue::DONE).count();
+        let nodes_done = self.node_status.iter().filter(|ns|ns.is_done()).count();
         "UPDATE `run` SET `status`=?,`nodes_done`=?,`details`=? WHERE `id`=?"
             .with((status.as_str(),nodes_done,&details,run_id))
             .run(conn)
