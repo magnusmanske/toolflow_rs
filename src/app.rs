@@ -26,7 +26,7 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         Self {
-            pool: Pool::new(toolforge::db::toolsdb("s53704__toolflow_p".to_string())
+            pool: Pool::new(toolforge::db::toolsdb("s53704__toolflow".to_string())
                 .expect("unable to load db config")
                 .to_string()
                 .as_str(),),
