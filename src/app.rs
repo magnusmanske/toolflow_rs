@@ -11,7 +11,7 @@ use lazy_static::lazy_static;
 use crate::data_file::DataFile;
 
 pub const USER_AGENT: &'static str = toolforge::user_agent!("toolflow");
-const REQWEST_TIMEOUT: u64 = 60;
+const REQWEST_TIMEOUT: u64 = 60*5;
 
 lazy_static!{
     static ref RE_WEBSERVER_WIKIPEDIA: Regex = Regex::new(r"^(.+)wiki$").expect("Regex error");
