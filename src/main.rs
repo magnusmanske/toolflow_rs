@@ -12,6 +12,7 @@ pub mod mapping;
 pub mod adapter;
 pub mod join;
 pub mod filter;
+pub mod generator;
 pub mod data_cell;
 pub mod data_header;
 pub mod workflow;

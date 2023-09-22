@@ -1,9 +1,8 @@
-use std::{fs::File, io::{Write, Seek}, collections::HashMap, thread, time, env};
+use std::{collections::HashMap, thread, time, env};
 use anyhow::{Result, anyhow};
 use mediawiki::api::Api;
 use regex::Regex;
 use serde_json::Value;
-use tempfile::*;
 use toolforge::pool::mysql_async::{prelude::*, Pool, Conn};
 use tokio::sync::RwLock;
 use lazy_static::lazy_static;
@@ -81,7 +80,7 @@ impl App {
         Ok(ret)
     }
 
-    fn get_webserver_for_wiki(&self, wiki: &str) -> Option<String> {
+    pub fn get_webserver_for_wiki(&self, wiki: &str) -> Option<String> {
         match wiki {
             "commonswiki" => Some("commons.wikimedia.org".to_string()),
             "wikidatawiki" => Some("www.wikidata.org".to_string()),
@@ -169,30 +168,20 @@ impl App {
             .build()?)
     }
 
-    /// Queries SPARQL and returns a filename with the result as CSV.
-    pub async fn load_sparql_csv(&self, sparql: &str) -> Result<csv::Reader<File>> {
-        let url = format!("https://query.wikidata.org/sparql?query={}",sparql);
-        let mut f = tempfile()?;
-        let mut res = Self::reqwest_client()?
-            .get(url)
-            .header(reqwest::header::ACCEPT, reqwest::header::HeaderValue::from_str("text/csv")?)
-            .send()
-            .await?;
-        while let Some(chunk) = res.chunk().await? {
-            f.write_all(chunk.as_ref())?;
-        }
-        f.seek(std::io::SeekFrom::Start(0))?;
-        Ok(csv::ReaderBuilder::new()
-            .flexible(true)
-            .has_headers(true)
-            .delimiter(b',')
-            .from_reader(f))
-
-        /* HOWTO use:
-        let mut reader = self.mnm.load_sparql_csv(&sparql).await?;
-        for result in reader.records() {
-            let record = result.unwrap();
-        }*/
+    pub async fn add_user_oauth_to_api(&self, api: &mut Api, user_id: usize) -> Result<()> {
+        let conn = self.get_db_connection().await?;
+        let oauth = "SELECT `oauth` FROM `user` WHERE `id`=?"
+            .with((user_id,))
+            .map(conn, |oauth: String| oauth)
+            .await?
+            .iter()
+            .next()
+            .ok_or_else(||anyhow!("User does not have OAuth information stored"))?
+            .to_owned();
+        let j: Value = serde_json::from_str(&oauth)?;
+        let oauth_params = mediawiki::api::OAuthParams::new_from_json(&j);
+        api.set_oauth(Some(oauth_params));
+        Ok(())
     }
 
 }

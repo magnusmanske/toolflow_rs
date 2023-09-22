@@ -106,7 +106,7 @@ impl Workflow {
                 .map(|edge|NodeInput{node_id: edge.target_node, uuid: self.run.get_node_status(edge.source_node).uuid().to_string(), slot:edge.target_slot})
                 .for_each(|i| { let _ = inputs.entry(i.node_id).or_default().insert(i.slot,i.uuid.to_owned()); } );
 
-            let futures: Vec<_> = nodes_to_run.iter().map(|node_id|self.nodes[*node_id].run(inputs.get(node_id).unwrap())).collect();
+            let futures: Vec<_> = nodes_to_run.iter().map(|node_id|self.nodes[*node_id].run(inputs.get(node_id).unwrap(), self.user_id)).collect();
             let results = join_all(futures).await;
 
             // Set error for all nodes
@@ -139,6 +139,9 @@ impl Workflow {
                 return Err(anyhow!("User cancelled run"));
             }
             for (node_id,dfd) in node_file {
+                if !dfd.is_valid() {
+                    continue; // TODO is this the right thing to do?
+                }
                 let is_output_node = self.run.is_output_node(node_id);
                 let end_time = if is_output_node { "null" } else { "NOW() + INTERVAL 1 HOUR" };
                 format!("INSERT INTO `file` (`uuid`,`expires`,`run_id`,`node_id`,`is_output`,`rows`) VALUES (?,{end_time},?,?,?,?)")

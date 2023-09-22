@@ -1,14 +1,16 @@
 use std::collections::HashMap;
+use tempfile::*;
+use std::{fs::File, io::{Write, Seek}};
 use async_trait::async_trait;
 use anyhow::{anyhow, Result};
 use serde_json::{Value, json};
 use url::Url;
 
 use crate::app::App;
+use crate::APP;
 use crate::data_cell::DataCell;
 use crate::data_file::{DataFile, DataFileDetails};
 use crate::mapping::{HeaderMapping, SourceId};
-use crate::APP;
 use crate::wiki_page::WikiPage;
 
 /*
@@ -51,6 +53,28 @@ pub trait Adapter {
 pub struct SparqlAdapter {
 }
 
+impl SparqlAdapter {
+    /// Queries SPARQL and returns a filename with the result as CSV.
+    pub async fn load_sparql_csv(&self, sparql: &str) -> Result<csv::Reader<File>> {
+        let url = format!("https://query.wikidata.org/sparql?query={}",sparql);
+        let mut f = tempfile()?;
+        let mut res = App::reqwest_client()?
+            .get(url)
+            .header(reqwest::header::ACCEPT, reqwest::header::HeaderValue::from_str("text/csv")?)
+            .send()
+            .await?;
+        while let Some(chunk) = res.chunk().await? {
+            f.write_all(chunk.as_ref())?;
+        }
+        f.seek(std::io::SeekFrom::Start(0))?;
+        Ok(csv::ReaderBuilder::new()
+            .flexible(true)
+            .has_headers(true)
+            .delimiter(b',')
+            .from_reader(f))
+    }
+}
+
 #[async_trait]
 impl Adapter for SparqlAdapter {
     async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
@@ -58,7 +82,7 @@ impl Adapter for SparqlAdapter {
             SourceId::Sparql(sparql) => sparql,
             _ => return Err(anyhow!("Unsuitable source type for SPARQL: {source:?}")),
         };
-        let mut reader = APP.load_sparql_csv(&sparql).await?;
+        let mut reader = self.load_sparql_csv(&sparql).await?;
         let labels: Vec<String> = reader.headers()?.iter().map(|s|s.to_string()).collect();
         let label2col_num: HashMap<String,usize> = labels.into_iter().enumerate().map(|(colnum,header)|(header,colnum)).collect();
 

@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::*, data_file::DataFileDetails, join::Join};
+use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::*, data_file::DataFileDetails, join::Join, generator::Generator};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,6 +16,7 @@ pub enum WorkflowNodeKind {
     WdFist,
     Join,
     Filter,
+    Generator,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +27,7 @@ pub struct WorkflowNode {
 }
 
 impl WorkflowNode {
-    pub async fn run(&self, input: &HashMap<usize,String>) -> Result<DataFileDetails> {
+    pub async fn run(&self, input: &HashMap<usize,String>, user_id: usize) -> Result<DataFileDetails> {
         match self.kind {
             WorkflowNodeKind::QuarryQueryLatest => {
                 let id = self.param_u64("quarry_query_id")?;
@@ -84,6 +85,17 @@ impl WorkflowNode {
                     0 => Err(anyhow!("Filter has no input")),
                     1 => filter.process(&uuids[0]).await,
                     other => Err(anyhow!("Filter has {other} inputs, should only have one")),
+                }
+            },
+            WorkflowNodeKind::Generator => {
+                let mode = self.param_string("mode")?;
+                match mode.as_str() {
+                    "wikipage" => {
+                        let wiki = self.param_string("wiki")?;
+                        let page = self.param_string("page")?;
+                        Generator::wikipage(&wiki,&page,user_id).await
+                    }
+                    other => Err(anyhow!("Unknown join mode '{other}'"))
                 }
             },
         }

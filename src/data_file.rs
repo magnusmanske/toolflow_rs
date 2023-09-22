@@ -13,6 +13,20 @@ use crate::data_header::DataHeader;
 pub struct DataFileDetails {
     pub uuid: String,
     pub rows: usize,
+    is_valid: bool,
+}
+
+impl DataFileDetails {
+    pub fn new_invalid() -> Self {
+        Self {
+            is_valid: false,
+            ..Default::default()
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.is_valid
+    }
 }
 
 #[derive(Default)]
@@ -53,6 +67,7 @@ impl DataFile {
                 None => String::default(),
             },
             rows: self.row_counter,
+            is_valid: true,
         }
     }
 
