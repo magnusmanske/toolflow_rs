@@ -176,7 +176,7 @@ impl App {
             .await?
             .iter()
             .next()
-            .ok_or_else(||anyhow!("User does not have OAuth information stored"))?
+            .ok_or_else(||anyhow!("User {user_id} does not have OAuth information stored"))?
             .to_owned();
         let j: Value = serde_json::from_str(&oauth)?;
         let oauth_params = mediawiki::api::OAuthParams::new_from_json(&j);
