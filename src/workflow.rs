@@ -73,13 +73,14 @@ impl Workflow {
     }
 
     pub async fn from_id(workflow_id: usize) -> Result<Self> {
-        let mut conn = APP.get_db_connection().await?;
-        let (name, mut ret,state) = format!("SELECT `name`,`json`,`state` FROM `workflow` WHERE `id`={workflow_id}")
+        let conn = APP.get_db_connection().await?;
+        let (name, mut ret,state, user_id) = format!("SELECT `name`,`json`,`state`,`user_id` FROM `workflow` WHERE `id`={workflow_id}")
             .with(())
-            .map(&mut conn, |x:(String,String,String)| (
+            .map(conn, |x:(String,String,String,usize)| (
                     x.0.to_owned(),
                     serde_json::from_str::<Self>(&x.1).unwrap(),
-                    WorkflowState::from_str(&x.2).unwrap_or_default()
+                    WorkflowState::from_str(&x.2).unwrap_or_default(),
+                    x.3,
                 ) )
             .await?
             .pop()
@@ -87,6 +88,7 @@ impl Workflow {
         ret.id = workflow_id;
         ret.name = name;
         ret.state = state;
+        ret.user_id = user_id;
         ret.run = WorkflowRun::new(&ret);
         Ok(ret)
     }

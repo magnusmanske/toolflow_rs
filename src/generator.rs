@@ -32,7 +32,10 @@ impl Generator {
         let after = re.replace_all(&before,replace_with.to_owned()).to_string();
         let wikitext = if before==after { replace_with } else { format!("{before}\n{after}").trim().to_string() }; // Replace or append
 
-        page.edit_text(&mut api, wikitext, "ToolFlow generator edit").await.map_err(|e|anyhow!(e.to_string()))?;
+        if !cfg!(test) {
+            // Do not actually edit the page in testing, we know the Api crate works
+            page.edit_text(&mut api, wikitext, "ToolFlow generator edit").await.map_err(|e|anyhow!(e.to_string()))?;
+        }
         Ok(DataFileDetails::new_invalid())
     }
 }
