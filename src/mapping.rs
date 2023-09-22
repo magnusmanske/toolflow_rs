@@ -9,6 +9,7 @@ pub enum SourceId {
     PetScan(u64),
     PagePile(u64),
     AListBuildingTool((String,String)),
+    WdFist(String),
 }
 
 

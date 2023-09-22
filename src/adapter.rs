@@ -2,12 +2,14 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use anyhow::{anyhow, Result};
 use serde_json::{Value, json};
+use url::Url;
 
 use crate::app::App;
 use crate::data_cell::DataCell;
 use crate::data_file::{DataFile, DataFileDetails};
 use crate::mapping::{HeaderMapping, SourceId};
 use crate::APP;
+use crate::wiki_page::WikiPage;
 
 /*
 To add a new adapter struct:
@@ -265,13 +267,159 @@ impl Adapter for AListBuildingToolAdapter {
     }
 }
 
+
+#[derive(Debug, Default)]
+struct WdFistParams {
+    sparql: Option<String>,
+    language: Option<String>,
+    project: Option<String>,
+    depth: Option<i64>,
+    no_images_only: bool,
+    wdf_langlinks: bool,
+    wdf_only_files_not_on_wd: bool,
+    wdf_max_five_results: bool,
+}
+
+impl WdFistParams {
+    fn from_url(url: &Url) -> Result<Self> {
+        if url.host_str()!=Some("fist.toolforge.org") {
+            return Err(anyhow!("Not a WD-FIST URL: {url}"));
+        }
+        let mut ret = Self::default();
+        ret.wdf_langlinks = true; // TODO from params, somehow
+        ret.wdf_only_files_not_on_wd = true; // TODO from params, somehow
+        ret.wdf_max_five_results = true; // TODO from params, somehow
+        url.query_pairs().for_each(|(k,v)|{
+            match k.as_ref() {
+                "sparql" => ret.sparql = Some(v.to_string()),
+                "language" => ret.language = Some(v.to_string()),
+                "project" => ret.project = Some(v.to_string()),
+                "depth" => ret.depth = v.parse::<i64>().ok(),
+                "no_images_only" => ret.no_images_only = v.parse::<bool>().unwrap_or(false),
+                _ => {} // Ignore
+            }
+        });
+        Ok(ret)
+    }
+
+    fn to_petscan_url(&self) -> String {
+        let mut params : Vec<(String,String)> = vec![];
+        params.push(("wdf_main".to_string(),"1".to_string()));
+        params.push(("doit".to_string(),"1".to_string()));
+        params.push(("format".to_string(),"json".to_string()));
+        if let Some(value) = &self.sparql {
+            params.push(("sparql".to_string(),value.to_owned()));
+        }
+        if self.no_images_only {
+            params.push(("wdf_only_items_without_p18".to_string(),"1".to_string()));
+        }
+        if self.wdf_langlinks {
+            params.push(("wdf_langlinks".to_string(),"1".to_string()));
+        }
+        if self.wdf_only_files_not_on_wd {
+            params.push(("wdf_only_files_not_on_wd".to_string(),"1".to_string()));
+        }
+        if self.wdf_max_five_results {
+            params.push(("wdf_max_five_results".to_string(),"1".to_string()));
+        }
+        // TODO language
+        // TODO project
+        // TODO depth
+        let url = Url::parse_with_params("https://petscan.wmflabs.org",&params).expect("Hardcoded PetScan URL failed");
+        url.to_string()
+    }
+}
+
+/* 
+https://petscan.wmflabs.org/?callback=jQuery331043160978373454995_1695377525224&wdf_main=1&doit=1&format=json&sparql=SELECT%20%3Fitem%20WHERE%20%7B%20%3Fitem%20wdt%3AP31%20wd%3AQ5%20%3B%20wdt%3AP21%20wd%3AQ6581072%20%3B%20wdt%3AP106%2Fwdt%3AP279*%20wd%3AQ901%20%7D&wdf_only_items_without_p18=1&wdf_langlinks=1&wdf_only_files_not_on_wd=1&wdf_max_five_results=1
+https://petscan.wmflabs.org/?callback=jQuery331043160978373454995_1695377525224&
+// wdf_main=1&
+// doit=1&
+// format=json&
+// sparql=SELECT ?item WHERE { ?item wdt:P31 wd:Q5 ; wdt:P21 wd:Q6581072 ; wdt:P106/wdt:P279* wd:Q901 }&
+// wdf_only_items_without_p18=1&
+// wdf_langlinks=1&
+wdf_only_files_not_on_wd=1&
+wdf_max_five_results=1
+
+*/
+
+/*
+https://fist.toolforge.org/wdfist/index.html?depth=3&language=en&project=wikipedia&sparql=SELECT%20?item%20WHERE%20{%20?item%20wdt:P31%20wd:Q5%20;%20wdt:P21%20wd:Q6581072%20;%20wdt:P106/wdt:P279*%20wd:Q901%20}&no_images_only=1&remove_used=1&remove_multiple=1&prefilled=1
+
+https://fist.toolforge.org/wdfist/index.html?
+// depth=3&
+// language=en&
+// project=wikipedia&
+// sparql=SELECT ?item WHERE { ?item wdt:P31 wd:Q5 ; wdt:P21 wd:Q6581072 ; wdt:P106/wdt:P279* wd:Q901 }&
+// no_images_only=1&
+remove_used=1&
+remove_multiple=1
+&prefilled=1
+*/
+
+
+#[derive(Debug, Default)]
+pub struct WdFistAdapter {
+}
+
+#[async_trait]
+impl Adapter for WdFistAdapter {
+    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+        let url = match source {
+            SourceId::WdFist(url) => Url::parse(url)?,
+            _ => return Err(anyhow!("Unsuitable source type for WdFist: {source:?}")),
+        };
+        let wdfist = WdFistParams::from_url(&url)?;
+        let petscan_url = wdfist.to_petscan_url();
+        // println!("{petscan_url}");
+
+        let j: Value = App::reqwest_client()?.get(petscan_url).send().await?.json().await?;        
+        
+        let mut file = DataFile::new_output_file()?;
+        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
+
+        for (qid,images) in j["data"].as_object().ok_or(anyhow!("JSON is not an object"))? {
+            let images = match images.as_object() {
+                Some(images) => images,
+                None => continue, // Ignore this
+            };
+            for (image_name,count) in images.iter() {
+                if let Some(count) = count.as_i64() {
+                    let mut jsonl_row = vec![];
+
+                    let mut wp = WikiPage::new_wikidata_item();
+                    wp.prefixed_title = Some(qid.to_owned());
+                    jsonl_row.push(DataCell::WikiPage(wp));
+
+                    let wp = WikiPage{
+                            title:Some(image_name.to_owned()),
+                            prefixed_title:Some(format!("File:{image_name}")),
+                            ns_id:Some(6),
+                            page_id:None,
+                            ns_prefix:Some("File".to_string()),
+                            wiki:Some("commonswiki".to_string())
+                        };
+                    jsonl_row.push(DataCell::WikiPage(wp));
+
+                    jsonl_row.push(DataCell::Int(count));
+
+                    file.write_json_row(&json!{jsonl_row})?; // Output data row
+                }
+            }
+        }
+
+        Ok(file.details())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
     async fn test_adapter_pagepile() {
-        let hm = "{\"data\":[{\"header\":{\"kind\":{\"WikiPage\":{\"ns_id\":null,\"ns_prefix\":null,\"page_id\":null,\"prefixed_title\":null,\"title\":null,\"wiki\":\"dewiki\"}},\"name\":\"wiki_page\"},\"mapping\":[[\"page\",\"prefixed_title\"]]}]}";
+        let hm = "{\"data\":[{\"header\":{\"kind\":{\"WikiPage\":{\"ns_id\":0,\"ns_prefix\":null,\"page_id\":null,\"prefixed_title\":null,\"title\":null,\"wiki\":\"wikidatawiki\"}},\"name\":\"wikidat_item\"},\"mapping\":[[\"page\",\"prefixed_title\"]]}]}";
         let header_mapping: HeaderMapping = serde_json::from_str(hm).unwrap();
         let id = 51805;
         let df = PagePileAdapter::default().source2file(&&SourceId::PagePile(id), &header_mapping).await.unwrap();
@@ -296,6 +444,16 @@ mod tests {
         let header_mapping: HeaderMapping = serde_json::from_str(hm).unwrap();
         let id = ("enwiki".to_string(),"Q82069695".to_string());
         let df = AListBuildingToolAdapter::default().source2file(&&&SourceId::AListBuildingTool(id), &header_mapping).await.unwrap();
+        assert!(df.rows>1);
+        APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
+    }
+
+    #[tokio::test]
+    async fn test_adapter_wdfist() {
+        let j = json!({"data": [{"header": {"kind": {"WikiPage": {"ns_id": 0,"ns_prefix": null,"page_id": null,"prefixed_title": null,"title": null,"wiki": "wikidatawiki"}},"name": "wikidata_item"},"mapping": []},{"header": {"kind": {"WikiPage": {"ns_id": 6,"ns_prefix": "File","page_id": null,"prefixed_title": null,"title": null,"wiki": "commonswiki"}},"name": "commons_image"},"mapping": []},{"header": {"kind": {"Int": null},"name": "number_of_uses"},"mapping": []}]});
+        let header_mapping: HeaderMapping = serde_json::from_str(&j.to_string()).unwrap();
+        let id = "https://fist.toolforge.org/wdfist/index.html?depth=3&language=en&project=wikipedia&sparql=SELECT%20?item%20WHERE%20{%20?item%20wdt:P31%20wd:Q5%20;%20wdt:P21%20wd:Q6581072%20;%20wdt:P106/wdt:P279*%20wd:Q901%20}%20LIMIT%2010&no_images_only=1&remove_used=1&remove_multiple=1&prefilled=1".to_string();
+        let df = WdFistAdapter::default().source2file(&SourceId::WdFist(id), &header_mapping).await.unwrap();
         assert!(df.rows>1);
         APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
     }

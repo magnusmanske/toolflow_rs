@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::{QuarryQueryAdapter, Adapter, SparqlAdapter, PetScanAdapter, PagePileAdapter, AListBuildingToolAdapter}, data_file::DataFileDetails, join::Join};
+use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::*, data_file::DataFileDetails, join::Join};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +13,7 @@ pub enum WorkflowNodeKind {
     PetScan,
     PagePile,
     AListBuildingTool,
+    WdFist,
     Join,
     Filter,
 }
@@ -42,6 +43,10 @@ impl WorkflowNode {
             WorkflowNodeKind::PagePile => {
                 let id = self.param_u64("pagepile_id")?;
                 PagePileAdapter::default().source2file(&&SourceId::PagePile(id), &self.header_mapping).await
+            },
+            WorkflowNodeKind::WdFist => {
+                let url = self.param_string("wdfist_url")?;
+                WdFistAdapter::default().source2file(&&SourceId::WdFist(url), &self.header_mapping).await
             },
             WorkflowNodeKind::AListBuildingTool => {
                 let wiki = self.param_string("wiki")?;
