@@ -29,12 +29,16 @@ impl Generator {
         let end = "<!--TOOLFLOW GENERATOR END-->";
         let re = Regex::new(&format!("{start}.*{end}")).unwrap();
         let replace_with = format!("{start}\n{wiki_table}\n{end}\n");
-        let after = re.replace_all(&before,replace_with.to_owned()).to_string();
-        let wikitext = if before==after { replace_with } else { format!("{before}\n{after}").trim().to_string() }; // Replace or append
+        let after = if re.is_match(&before) {
+            re.replace_all(&before,replace_with.to_owned()).to_string()
+        } else {
+            format!("{before}\n{replace_with}").trim().to_string()
+        };
 
-        if !cfg!(test) {
+        if before!= after && !cfg!(test) {
+            // Only perform the edit if something has changed
             // Do not actually edit the page in testing, we know the Api crate works
-            page.edit_text(&mut api, wikitext, "ToolFlow generator edit").await.map_err(|e|anyhow!(e.to_string()))?;
+            page.edit_text(&mut api, after, "ToolFlow generator edit").await.map_err(|e|anyhow!(e.to_string()))?;
         }
         Ok(DataFileDetails::new_invalid())
     }
