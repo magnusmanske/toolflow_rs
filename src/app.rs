@@ -112,12 +112,11 @@ impl App {
     }
 
     pub async fn clear_old_files(&self) -> Result<()> {
-        let mut conn = self.get_db_connection().await?;
+        let conn = self.get_db_connection().await?;
         let results: Vec<(usize,String)> = "SELECT `id`,`uuid` FROM `file` WHERE `expires`<=NOW()"
             .with(())
-            .map(&mut conn, |(id,uuid)| (id,uuid) )
+            .map(conn, |(id,uuid)| (id,uuid) )
             .await?;
-        drop(conn);
         let mut ids_to_delete = vec![];
         for (id,uuid) in results {
             match self.remove_uuid_file(&uuid) {
@@ -130,6 +129,14 @@ impl App {
             format!("DELETE FROM `file` WHERE `id` IN ({})",ids_to_delete.join(",")).with(()).run(&mut conn).await?;
         }
         Ok(())
+    }
+
+    pub async fn reset_running_jobs(&self) -> Result<()> {
+        let conn = self.get_db_connection().await?;
+        match "UPDATE `run` SET `status`='WAIT' WHERE `status`='RUN'".with(()).run(conn).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(anyhow!("{e}")),
+        }
     }
 
     pub fn remove_uuid_file(&self, uuid: &str) -> Result<()> {

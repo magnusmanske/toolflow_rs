@@ -26,13 +26,14 @@ lazy_static! {
 
 #[tokio::main]
 async fn main() {
+    let _ = APP.clear_old_files().await;
+    let _ = APP.reset_running_jobs().await.expect("Could not reset RUN-state runs to WAIT");
+    let mut last_clear_time = SystemTime::now();
+
     let mut conn = match APP.get_db_connection().await {
         Ok(conn) => conn,
         Err(e) => panic!("{e}"),
     };
-
-    let _ = APP.clear_old_files().await;
-    let mut last_clear_time = SystemTime::now();
 
 
     loop {
