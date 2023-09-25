@@ -121,6 +121,10 @@ impl Renderer for RendererWikitext {
                         let wiki_prefix = RE_WIKI_TO_PREFIX.replace(&wiki,"$1");
                         title = format!(":{wiki_prefix}:{title}");
                     }
+                } else if wp.ns_id==Some(0) && wiki=="wikidatawiki" { // Wikidata item on Wikidata
+                    title = format!("{{Q|{title}}}");
+                } else if wp.ns_id==Some(120) && wiki=="wikidatawiki" { // Wikidata property on Wikidata
+                    title = format!("{{P|{title}}}");
                 } else if wp.ns_id==Some(6) { // Local file
                     title = format!("{title}|thumbnail|");
                 } else if wp.ns_id==Some(14) { // Local category
@@ -128,7 +132,7 @@ impl Renderer for RendererWikitext {
                 }
 
                 let mut link = title.to_owned();
-                if wp.ns_id!=Some(6) && !title.contains('_') {
+                if wp.ns_id!=Some(6) && title.contains('_') {
                     let pretty_title = title.replace('_', " ");
                     let pretty_title = match title.chars().next() {
                         Some(':') => pretty_title[1..].to_string(),
@@ -159,7 +163,7 @@ mod tests {
         let mut df = DataFile::default();
         df.open_input_file(uuid).unwrap();
         let wikitext = renderer.render(&mut df).unwrap();
-        assert_eq!(wikitext.len(),69337);
+        assert_eq!(wikitext.len(),110514);
     }
 
 }
