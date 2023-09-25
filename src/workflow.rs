@@ -55,6 +55,9 @@ pub struct Workflow {
 
     #[serde(skip)]
     name: String,
+
+    #[serde(skip)]
+    description: String,
 }
 
 impl Workflow {
@@ -67,6 +70,7 @@ impl Workflow {
             state: WorkflowState::default(),
             run: WorkflowRun::default(),
             name: String::default(),
+            description: String::default(),
         };
         ret.run = WorkflowRun::new(&ret);
         ret
@@ -158,6 +162,10 @@ impl Workflow {
         self.run.update_status(WorkflowNodeStatusValue::DONE, &mut APP.get_db_connection().await?).await?;
 
         Ok(())
+    }
+
+    pub fn description(&self) -> &str {
+        &self.description
     }
 
     fn node_open_dependencies(&self, node_id: usize) -> usize {
