@@ -115,22 +115,37 @@ impl App {
     }
 
     async fn activate_scheduled_runs(&self, conn: &mut Conn) -> Result<()> {
-        // Possible race condition; all should use the same now(). However, chances are extremely low for this.
-        conn.exec_drop("UPDATE `run` SET `status`='WAIT' WHERE `status`!='RUN' AND `id` IN (SELECT `run_id` FROM `scheduler` WHERE `is_active`=1 AND `next_event`<now())", ()).await?;
-        if conn.affected_rows()>0 {
-            conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 DAY) WHERE `interval`='DAILY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
-            conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 WEEK) WHERE `interval`='WEEKLY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
-            conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 MONTH) WHERE `interval`='MONTHLY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
+        let run_ids = "SELECT `run_id` FROM `scheduler` WHERE `is_active`=1 AND `next_event`<now()"
+            .with(())
+            .map(&mut (*conn), |run_id: usize| run_id)
+            .await?;
+        for run_id in run_ids.iter() {
+            let _ = self.clear_all_run_results(*run_id, &mut (*conn)).await;
+            conn.exec_drop("UPDATE `run` SET `status`='WAIT' WHERE `status`!='RUN' AND `id`=?", (run_id,)).await?;
+            conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 DAY) WHERE `interval`='DAILY' AND `is_active`=1 AND `run_id`=?", (run_id,)).await?;
+            conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 WEEK) WHERE `interval`='WEEKLY' AND `is_active`=1 AND `run_id`=?", (run_id,)).await?;
+            conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 MONTH) WHERE `interval`='MONTHLY' AND `is_active`=1 AND `run_id`=?", (run_id,)).await?;
         }
         Ok(())
     }
 
-    pub async fn clear_old_files(&self) -> Result<()> {
-        let conn = self.get_db_connection().await?;
+    pub async fn clear_old_files(&self, conn: &mut Conn) -> Result<()> {
         let results: Vec<(usize,String)> = "SELECT `id`,`uuid` FROM `file` WHERE `expires`<=NOW()"
             .with(())
-            .map(conn, |(id,uuid)| (id,uuid) )
+            .map(&mut (*conn), |(id,uuid)| (id,uuid) )
             .await?;
+        self.remove_files(results, conn).await
+    }
+
+    async fn clear_all_run_results(&self, run_id: usize, conn: &mut Conn) -> Result<()> {
+        let results: Vec<(usize,String)> = "SELECT `id`,`uuid` FROM `file` WHERE `run_id`=?"
+            .with((run_id,))
+            .map(&mut (*conn), |(id,uuid)| (id,uuid) )
+            .await?;
+        self.remove_files(results, conn).await
+    }
+
+    async fn remove_files(&self, results: Vec<(usize,String)>, conn: &mut Conn) -> Result<()> {
         let mut ids_to_delete = vec![];
         for (id,uuid) in results {
             match self.remove_uuid_file(&uuid) {
@@ -139,8 +154,7 @@ impl App {
             }
         }
         if !ids_to_delete.is_empty() {
-            let mut conn = self.get_db_connection().await?;
-            format!("DELETE FROM `file` WHERE `id` IN ({})",ids_to_delete.join(",")).with(()).run(&mut conn).await?;
+            format!("DELETE FROM `file` WHERE `id` IN ({})",ids_to_delete.join(",")).with(()).run(conn).await?;
         }
         Ok(())
     }
