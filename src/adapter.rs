@@ -389,7 +389,6 @@ impl Adapter for WdFistAdapter {
         };
         let wdfist = WdFistParams::from_url(&url)?;
         let petscan_url = wdfist.to_petscan_url();
-        println!("{petscan_url}");
 
         let j: Value = App::reqwest_client()?.get(petscan_url).send().await?.json().await?;        
         
