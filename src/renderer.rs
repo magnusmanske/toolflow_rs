@@ -103,7 +103,7 @@ impl Renderer for RendererWikitext {
 
     fn render_cell(&self, col_header: &ColumnHeader, row_num: usize, col_num: usize, cell: DataCell) -> Result<String> {
         let default_wiki = self.default_wiki.lock().unwrap();
-        Ok("|| ".to_string() + &match cell {
+        Ok("||".to_string() + &match cell {
             DataCell::PlainText(s) => s,
             DataCell::WikiPage(wp) => {
                 let mut title = wp.prefixed_title.ok_or_else(||anyhow!("Row {row_num} column {col_num}: WikiPage has no prefixed_title"))?;
@@ -122,9 +122,9 @@ impl Renderer for RendererWikitext {
                         title = format!(":{wiki_prefix}:{title}");
                     }
                 } else if wp.ns_id==Some(0) && wiki=="wikidatawiki" { // Wikidata item on Wikidata
-                    return Ok(format!("{{{{Q|{}}}}}",&title[1..]));
+                    return Ok(format!("||{{{{Q|{}}}}}\n",&title[1..]));
                 } else if wp.ns_id==Some(120) && wiki=="wikidatawiki" { // Wikidata property on Wikidata
-                    return Ok(format!("{{{{P|{}}}}}",&title[1..]));
+                    return Ok(format!("||{{{{P|{}}}}}\n",&title[1..]));
                 } else if wp.ns_id==Some(6) { // Local file
                     title = format!("{title}|thumbnail|");
                 } else if wp.ns_id==Some(14) { // Local category
@@ -163,7 +163,7 @@ mod tests {
         let mut df = DataFile::default();
         df.open_input_file(uuid).unwrap();
         let wikitext = renderer.render(&mut df).unwrap();
-        assert_eq!(wikitext.len(),110514);
+        assert_eq!(wikitext.len(),108767);
     }
 
 }
