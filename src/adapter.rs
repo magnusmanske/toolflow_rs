@@ -375,7 +375,6 @@ impl WdFistParams {
             params.push(("wdf_max_five_results".to_string(),"1".to_string()));
         }
         let url = Url::parse_with_params("https://petscan.wmflabs.org",&params).expect("Hardcoded PetScan URL failed");
-        println!("{}",url.to_string());
         url.to_string()
     }
 }
@@ -393,7 +392,7 @@ impl Adapter for WdFistAdapter {
         };
         let wdfist = WdFistParams::from_url(&url)?;
         let petscan_url = wdfist.to_petscan_url();
-        // println!("{petscan_url}");
+        println!("{petscan_url}");
 
         let j: Value = App::reqwest_client()?.get(petscan_url).send().await?.json().await?;        
         

@@ -33,8 +33,6 @@ impl Generator {
             format!("{before}\n{replace_with}").trim().to_string()
         };
 
-        println!("{after}");
-
         if before!= after && !cfg!(test) {
             // Only perform the edit if something has changed
             // Do not actually edit the page in testing, we know the Api crate works
