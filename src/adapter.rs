@@ -325,7 +325,7 @@ impl WdFistParams {
                 "depth" => ret.depth = v.parse::<i64>().ok(),
                 "pagepile" => ret.pagepile = v.parse::<u64>().ok(),
                 "psid" => ret.psid = v.parse::<u64>().ok(),
-                "no_images_only" => ret.no_images_only = v.parse::<bool>().unwrap_or(false),
+                "no_images_only" => ret.no_images_only = v.parse::<u8>().unwrap_or(0)==1,
                 _ => {} // Ignore
             }
         });
@@ -337,9 +337,6 @@ impl WdFistParams {
         params.push(("wdf_main".to_string(),"1".to_string()));
         params.push(("doit".to_string(),"1".to_string()));
         params.push(("format".to_string(),"json".to_string()));
-        if let Some(value) = &self.sparql {
-            params.push(("sparql".to_string(),value.to_owned()));
-        }
         if let Some(value) = &self.sparql {
             params.push(("sparql".to_string(),value.to_owned()));
         }
