@@ -104,11 +104,23 @@ impl App {
     }
 
     pub async fn find_next_waiting_run(&self, conn: &mut Conn) -> Option<(u64,usize)> { // (run_id,workflow_id)
+        if let Err(e) = self.activate_scheduled_runs(conn).await {
+            eprintln!("{e}");
+        }
         "SELECT `id`,`workflow_id` FROM `run` WHERE `status`='WAIT' LIMIT 1"
             .with(())
             .map(conn, |(run_id,workflow_id)| (run_id,workflow_id) )
             .await.ok()?
             .pop()
+    }
+
+    async fn activate_scheduled_runs(&self, conn: &mut Conn) -> Result<()> {
+        // Possible race condition; all should use the same now(). However, chances are extremely low for this.
+        conn.exec_drop("UPDATE `run` SET `status`='WAIT' WHERE `status`!='RUN' AND `id` IN (SELECT `run_id` FROM `scheduler` WHERE `is_active`=1 AND `next_event`<now())", ()).await?;
+        conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 DAY) WHERE `interval`='DAILY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
+        conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 WEEK) WHERE `interval`='WEEKLY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
+        conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 MONTH) WHERE `interval`='MONTHLY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
+        Ok(())
     }
 
     pub async fn clear_old_files(&self) -> Result<()> {
