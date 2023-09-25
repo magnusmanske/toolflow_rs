@@ -117,9 +117,11 @@ impl App {
     async fn activate_scheduled_runs(&self, conn: &mut Conn) -> Result<()> {
         // Possible race condition; all should use the same now(). However, chances are extremely low for this.
         conn.exec_drop("UPDATE `run` SET `status`='WAIT' WHERE `status`!='RUN' AND `id` IN (SELECT `run_id` FROM `scheduler` WHERE `is_active`=1 AND `next_event`<now())", ()).await?;
-        conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 DAY) WHERE `interval`='DAILY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
-        conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 WEEK) WHERE `interval`='WEEKLY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
-        conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 MONTH) WHERE `interval`='MONTHLY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
+        if conn.affected_rows()>0 {
+            conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 DAY) WHERE `interval`='DAILY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
+            conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 WEEK) WHERE `interval`='WEEKLY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
+            conn.exec_drop("UPDATE `scheduler` SET `next_event`=DATE_ADD(now(), INTERVAL 1 MONTH) WHERE `interval`='MONTHLY' AND `is_active`=1 AND `next_event`<now()", ()).await?;
+        }
         Ok(())
     }
 
