@@ -122,9 +122,9 @@ impl Renderer for RendererWikitext {
                         title = format!(":{wiki_prefix}:{title}");
                     }
                 } else if wp.ns_id==Some(0) && wiki=="wikidatawiki" { // Wikidata item on Wikidata
-                    title = format!("{{Q|{}}}",&title[1..]);
+                    return Ok(format!("{{Q|{}}}",&title[1..]));
                 } else if wp.ns_id==Some(120) && wiki=="wikidatawiki" { // Wikidata property on Wikidata
-                    title = format!("{{P|{}}}",&title[1..]);
+                    return Ok(format!("{{P|{}}}",&title[1..]));
                 } else if wp.ns_id==Some(6) { // Local file
                     title = format!("{title}|thumbnail|");
                 } else if wp.ns_id==Some(14) { // Local category
