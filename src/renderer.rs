@@ -126,7 +126,12 @@ impl Renderer for RendererWikitext {
                 } else if wp.ns_id==Some(120) && wiki=="wikidatawiki" { // Wikidata property on Wikidata
                     return Ok(format!("||{{{{P|{}}}}}\n",&title[1..]));
                 } else if wp.ns_id==Some(6) { // Local file
-                    title = format!("{title}|thumbnail|");
+                    let filename_pretty = title.replace('_'," ");
+                    let filename_pretty = match filename_pretty.split_once(':') {
+                        Some(fp) => fp.1.to_string(),
+                        None => filename_pretty,
+                    };
+                    title = format!("{title}|thumbnail|{filename_pretty}");
                 } else if wp.ns_id==Some(14) { // Local category
                     title = format!(":{title}");
                 }
