@@ -74,6 +74,24 @@ impl RendererWikitext {
         }
         Ok(())
     }
+
+    fn pretty_filename(&self, title: &str) -> String {
+        let filename_pretty = title.replace('_'," ");
+
+        // Remove file prefix
+        let filename_pretty = match filename_pretty.split_once(':') {
+            Some(fp) => fp.1.to_string(),
+            None => filename_pretty,
+        };
+
+        // Remove file ending
+        let filename_pretty = match filename_pretty.rsplit_once('.') {
+            Some(fp) => fp.0.to_string(),
+            None => filename_pretty,
+        };
+
+        filename_pretty
+    }
 }
 
 impl Renderer for RendererWikitext {
@@ -116,7 +134,8 @@ impl Renderer for RendererWikitext {
                 let is_local_wiki = wp.wiki==*default_wiki;
                 if !is_local_wiki {
                     if wiki=="commonswiki" && wp.ns_id==Some(6) { // File on Commons
-                        title = format!("{title}|thumbnail|");
+                        let filename_pretty = self.pretty_filename(&title);
+                        title = format!("{title}|thumbnail|{filename_pretty}");
                     } else {
                         let wiki_prefix = RE_WIKI_TO_PREFIX.replace(&wiki,"$1");
                         title = format!(":{wiki_prefix}:{title}");
@@ -126,11 +145,7 @@ impl Renderer for RendererWikitext {
                 } else if wp.ns_id==Some(120) && wiki=="wikidatawiki" { // Wikidata property on Wikidata
                     return Ok(format!("||{{{{P|{}}}}}\n",&title[1..]));
                 } else if wp.ns_id==Some(6) { // Local file
-                    let filename_pretty = title.replace('_'," ");
-                    let filename_pretty = match filename_pretty.split_once(':') {
-                        Some(fp) => fp.1.to_string(),
-                        None => filename_pretty,
-                    };
+                    let filename_pretty = self.pretty_filename(&title);
                     title = format!("{title}|thumbnail|{filename_pretty}");
                 } else if wp.ns_id==Some(14) { // Local category
                     title = format!(":{title}");
@@ -164,10 +179,7 @@ mod tests {
     #[test]
     fn test_renderer_wikitext() {
         let uuid = "cb1e218e-421f-46b8-a77e-eac6799ce4e4";
-        let renderer = RendererWikitext::default();
-        let mut df = DataFile::default();
-        df.open_input_file(uuid).unwrap();
-        let wikitext = renderer.render(&mut df).unwrap();
+        let wikitext = RendererWikitext::default().render_from_uuid(uuid).unwrap();
         assert_eq!(wikitext.len(),108767);
     }
 
