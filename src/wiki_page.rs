@@ -46,9 +46,15 @@ impl WikiPage {
                         } else if parts.len()>1 {
                             self.ns_id = APP.get_namespace_id(wiki,parts[0]).await;
                         }
-                        if self.ns_id.is_some() {
-                            self.ns_prefix = Some(parts.remove(0).to_string());
-                            self.title = Some(parts.join(":"));
+                        match self.ns_id {
+                            Some(0) => {
+                                self.title = Some(parts.join(":"));
+                            },
+                            Some(_non_zero_namespace_id) => {
+                                self.ns_prefix = Some(parts.remove(0).to_string());
+                                self.title = Some(parts.join(":"));    
+                            },
+                            None => {},
                         }
                     }
                 }

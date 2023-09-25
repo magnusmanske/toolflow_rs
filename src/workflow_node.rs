@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::*, data_file::DataFileDetails, join::Join, generator::Generator};
+use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::*, data_file::DataFileDetails, join::Join, generator::Generator, renderer::{RendererWikitext, Renderer}};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,9 +91,11 @@ impl WorkflowNode {
                 let mode = self.param_string("mode")?;
                 match mode.as_str() {
                     "wikipage" => {
+                        let uuid = input.iter().map(|(_slot,uuid)|uuid.as_str()).next().ok_or_else(||anyhow!("No inputs for this node"))?;
                         let wiki = self.param_string("wiki")?;
                         let page = self.param_string("page")?;
-                        Generator::wikipage(&wiki,&page,user_id).await
+                        let wikitext = RendererWikitext::default().render_from_uuid(&uuid)?;
+                        Generator::wikipage(&wikitext,&wiki,&page,user_id).await
                     }
                     other => Err(anyhow!("Unknown join mode '{other}'"))
                 }

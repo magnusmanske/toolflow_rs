@@ -9,6 +9,7 @@ pub mod app;
 pub mod data_file;
 pub mod wiki_page;
 pub mod mapping;
+pub mod renderer;
 pub mod adapter;
 pub mod join;
 pub mod filter;

@@ -120,8 +120,8 @@ impl DataCell {
                 // TODO ugly fixme
                 let blank = String::new();
                 let title = wiki_page.title.as_ref().unwrap_or(&blank);
-                let namespace = wiki_page.ns_prefix.as_ref().unwrap_or(&blank);
-                let fallback = format!("{namespace}:{title}");
+                let ns_prefix = wiki_page.ns_prefix.as_ref().unwrap_or(&blank);
+                let fallback = format!("{ns_prefix}:{title}");
                 let fullname = wiki_page.prefixed_title.as_ref().unwrap_or(&fallback);
                 let wiki = wiki_page.wiki.as_ref().unwrap_or(&blank);
                 format!("{wiki}::{fullname}")
