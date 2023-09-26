@@ -1,5 +1,5 @@
 use std::sync::{Mutex, Arc};
-
+use ucfirst::ucfirst;
 use lazy_static::lazy_static;
 use anyhow::{Result,anyhow};
 use regex::Regex;
@@ -16,19 +16,17 @@ pub trait Renderer {
     fn render_row(&self, df: &mut DataFile, row_num: usize, row: Vec<DataCell>) -> Result<String>;
     fn render_cell(&self, col_header: &ColumnHeader, row_num: usize, col_num: usize, cell: DataCell) -> Result<String>;
 
-    fn render_row_separators(&self, df: &mut DataFile, row_num: usize, row: Vec<DataCell>, before: &str, between: &str, after: &str) -> Result<String> {
-        let mut ret = before.to_string();
-        ret += &row.into_iter()
-            .zip(df.header().columns.iter())
-            .enumerate()
-            .map(|(col_num,(cell,col_header))|self.render_cell(col_header,row_num,col_num,cell))
-            .collect::<Result<Vec<String>>>()?
-            .join(between);
-        ret += after;
-        Ok(ret)
+    fn render_from_uuid(&self, uuid: &str) -> Result<String> {
+        let mut df = DataFile::default();
+        df.open_input_file(uuid)?;
+        self.render(&mut df)
     }
 
     fn render(&self, df: &mut DataFile) -> Result<String> {
+        self.render_block(df)
+    }
+
+    fn render_block(&self, df: &mut DataFile) -> Result<String> {
         df.load_header()?;
         let mut ret = self.render_header(df)?;
         let mut row_num = 0;
@@ -45,12 +43,17 @@ pub trait Renderer {
         Ok(ret)
     }
 
-    fn render_from_uuid(&self, uuid: &str) -> Result<String> {
-        let mut df = DataFile::default();
-        df.open_input_file(uuid)?;
-        self.render(&mut df)
+    fn render_row_separators(&self, df: &mut DataFile, row_num: usize, row: Vec<DataCell>, before: &str, between: &str, after: &str) -> Result<String> {
+        let mut ret = before.to_string();
+        ret += &row.into_iter()
+            .zip(df.header().columns.iter())
+            .enumerate()
+            .map(|(col_num,(cell,col_header))|self.render_cell(col_header,row_num,col_num,cell))
+            .collect::<Result<Vec<String>>>()?
+            .join(between);
+        ret += after;
+        Ok(ret)
     }
-
 }
 
 #[derive(Default, Clone, Debug)]
@@ -101,7 +104,7 @@ impl Renderer for RendererWikitext {
         let mut ret = String::new();
         ret += "{| class=\"wikitable\"\n";
         ret += &df.header().columns.iter()
-            .map(|c|c.name.replace('_'," "))
+            .map(|c|ucfirst(&c.name.replace('_'," ")))
             .map(|s|format!("! {s}\n"))
             .collect::<Vec<String>>()
             .join("");
@@ -154,11 +157,10 @@ impl Renderer for RendererWikitext {
                 let mut link = title.to_owned();
                 if wp.ns_id!=Some(6) && title.contains('_') {
                     let pretty_title = title.replace('_', " ");
-                    let pretty_title = match title.chars().next() {
-                        Some(':') => pretty_title[1..].to_string(),
+                    link = match title.chars().next() {
+                        Some(':') => format!("{title}|{}",pretty_title[1..].to_string()),
                         _ => pretty_title,
                     };
-                    link = format!("{title}|{pretty_title}");
                 }
                 format!("[[{link}]]")
             },
@@ -180,7 +182,7 @@ mod tests {
     fn test_renderer_wikitext() {
         let uuid = "cb1e218e-421f-46b8-a77e-eac6799ce4e4";
         let wikitext = RendererWikitext::default().render_from_uuid(uuid).unwrap();
-        assert_eq!(wikitext.len(),108767);
+        assert_eq!(wikitext.len(),77266);
     }
 
 }

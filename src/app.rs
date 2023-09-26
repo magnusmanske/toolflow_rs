@@ -1,4 +1,4 @@
-use std::{collections::HashMap, thread, time, env};
+use std::{collections::HashMap, thread, time::{self, SystemTime}, env};
 use anyhow::{Result, anyhow};
 use mediawiki::api::Api;
 use regex::Regex;
@@ -7,7 +7,7 @@ use toolforge::pool::mysql_async::{prelude::*, Pool, Conn};
 use tokio::sync::RwLock;
 use lazy_static::lazy_static;
 
-use crate::data_file::DataFile;
+use crate::{data_file::DataFile, workflow_run::WorkflowNodeStatusValue, workflow::Workflow};
 
 pub const USER_AGENT: &'static str = toolforge::user_agent!("toolflow");
 const REQWEST_TIMEOUT: u64 = 60*5;
@@ -217,6 +217,51 @@ impl App {
         let oauth_params = mediawiki::api::OAuthParams::new_from_json(&j);
         api.set_oauth(Some(oauth_params));
         Ok(())
+    }
+
+    pub async fn server(&self) -> Result<()> {
+        let _ = self.clear_old_files(&mut self.get_db_connection().await?).await;
+        let _ = self.reset_running_jobs().await.expect("Could not reset RUN-state runs to WAIT");
+        let mut last_clear_time = SystemTime::now();
+    
+    
+        loop {
+            match last_clear_time.elapsed() {
+                Ok(elapsed) => {
+                    if elapsed.as_secs()>5*60 { // Every 5 minutes
+                        let _ = self.clear_old_files(&mut self.get_db_connection().await?).await;
+                        last_clear_time = SystemTime::now();
+                    }
+                }
+                Err(_) => {},
+            }
+    
+            let mut conn = self.get_db_connection().await?;
+            match self.find_next_waiting_run(&mut conn).await {
+                Some((run_id,workflow_id)) => {
+                    let mut workflow = match Workflow::from_id(workflow_id).await {
+                        Ok(workflow) => workflow,
+                        Err(e) => {
+                            eprintln!("Cannot get workflow {workflow_id}: {e}");
+                            continue;
+                        }
+                    };
+                    workflow.run.set_id(run_id);
+                    if let Err(e) = workflow.run.update_status(WorkflowNodeStatusValue::RUNNING, &mut conn).await {
+                        eprintln!("Cannot update initial status: {e}");
+                        continue;
+                    }
+                    println!("Starting workflow {workflow_id} run {run_id}");
+                    tokio::spawn(async move {
+                        println!("Started workflow {workflow_id} run {run_id}");
+                        let result = workflow.run().await;
+                        println!("Finished workflow {workflow_id} run {run_id}: {result:?}");
+                    });
+    
+                }
+                None => self.hold_on(),
+            }
+        }
     }
 
 }

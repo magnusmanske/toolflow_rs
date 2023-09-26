@@ -1,9 +1,9 @@
-use std::time::SystemTime;
-
+use anyhow::Result;
 use lazy_static::lazy_static;
 use app::App;
-use workflow::Workflow;
-use workflow_run::WorkflowNodeStatusValue;
+use clap::{arg, Command};
+
+use crate::renderer::{RendererWikitext, Renderer};
 
 pub mod app;
 pub mod data_file;
@@ -24,53 +24,50 @@ lazy_static! {
     static ref APP: App = App::new();
 }
 
+fn cli() -> Command {
+    Command::new("toolflow")
+        .about("ToolFlow server and command line utility")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
+        .allow_external_subcommands(true)
+        .subcommand(
+            Command::new("server")
+                .about("Runs the ToolFlow server")
+                // .arg(arg!(<REMOTE> "The remote to clone"))
+                // .arg_required_else_help(true),
+        )
+        .subcommand(
+            Command::new("render")
+                .about("Runs a renderer")
+                .arg(arg!(mode: [MODE]))
+                .arg(arg!(uuid: [UUID]))
+                // .arg(arg!(<MISC> "Misc parameters, depnding on renderer type"))
+                .arg_required_else_help(true),
+        )
+}
+
 #[tokio::main]
-async fn main() {
-    let mut conn = match APP.get_db_connection().await {
-        Ok(conn) => conn,
-        Err(e) => panic!("{e}"),
-    };
+async fn main() -> Result<()> {
+    let matches = cli().get_matches();
 
-    let _ = APP.clear_old_files(&mut conn).await;
-    let _ = APP.reset_running_jobs().await.expect("Could not reset RUN-state runs to WAIT");
-    let mut last_clear_time = SystemTime::now();
-
-
-    loop {
-        match last_clear_time.elapsed() {
-            Ok(elapsed) => {
-                if elapsed.as_secs()>5*60 { // Every 5 minutes
-                    let _ = APP.clear_old_files(&mut conn).await;
-                    last_clear_time = SystemTime::now();
+    match matches.subcommand() {
+        Some(("server", _sub_matches)) => {
+            APP.server().await
+        },
+        Some(("render", sub_matches)) => {
+            let mode = sub_matches.get_one::<String>("mode").map(|s| s.as_str()).expect("mode not set");
+            let uuid = sub_matches.get_one::<String>("uuid").map(|s| s.as_str()).expect("uuid not set");
+            // let _misc = sub_matches.get_one::<String>("misc").map(|s| s.as_str());
+            match mode {
+                "wiki" => {
+                    let wikitext = RendererWikitext::default().render_from_uuid(uuid).unwrap();
+                    println!("{wikitext}");
                 }
+                other => panic!("Render type '{other}' is not supported"),
             }
-            Err(_) => {},
+            Ok(())
         }
-
-        match APP.find_next_waiting_run(&mut conn).await {
-            Some((run_id,workflow_id)) => {
-                let mut workflow = match Workflow::from_id(workflow_id).await {
-                    Ok(workflow) => workflow,
-                    Err(e) => {
-                        eprintln!("Cannot get workflow {workflow_id}: {e}");
-                        continue;
-                    }
-                };
-                workflow.run.set_id(run_id);
-                if let Err(e) = workflow.run.update_status(WorkflowNodeStatusValue::RUNNING, &mut conn).await {
-                    eprintln!("Cannot update initial status: {e}");
-                    continue;
-                }
-                println!("Starting workflow {workflow_id} run {run_id}");
-                tokio::spawn(async move {
-                    println!("Started workflow {workflow_id} run {run_id}");
-                    let result = workflow.run().await;
-                    println!("Finished workflow {workflow_id} run {run_id}: {result:?}");
-                });
-
-            }
-            None => APP.hold_on(),
-        }
+        _ => unreachable!(), // If all subcommands are defined above, anything else is unreachable!()
     }
 }
 

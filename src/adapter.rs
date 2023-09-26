@@ -7,7 +7,6 @@ use serde_json::{Value, json};
 use url::Url;
 
 use crate::app::App;
-use crate::APP;
 use crate::data_cell::DataCell;
 use crate::data_file::{DataFile, DataFileDetails};
 use crate::mapping::{HeaderMapping, SourceId};
@@ -432,6 +431,7 @@ impl Adapter for WdFistAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::APP;
 
     #[tokio::test]
     async fn test_adapter_pagepile() {
@@ -468,7 +468,7 @@ mod tests {
     async fn test_adapter_wdfist() {
         let j = json!({"data": [{"header": {"kind": {"WikiPage": {"ns_id": 0,"ns_prefix": null,"page_id": null,"prefixed_title": null,"title": null,"wiki": "wikidatawiki"}},"name": "wikidata_item"},"mapping": []},{"header": {"kind": {"WikiPage": {"ns_id": 6,"ns_prefix": "File","page_id": null,"prefixed_title": null,"title": null,"wiki": "commonswiki"}},"name": "commons_image"},"mapping": []},{"header": {"kind": {"Int": null},"name": "number_of_uses"},"mapping": []}]});
         let header_mapping: HeaderMapping = serde_json::from_str(&j.to_string()).unwrap();
-        let id = "https://fist.toolforge.org/wdfist/index.html?depth=3&language=en&project=wikipedia&sparql=SELECT%20?item%20WHERE%20{%20?item%20wdt:P31%20wd:Q5%20;%20wdt:P21%20wd:Q6581072%20;%20wdt:P106/wdt:P279*%20wd:Q901%20}%20LIMIT%2010&no_images_only=1&remove_used=1&remove_multiple=1&prefilled=1".to_string();
+        let id = "https://fist.toolforge.org/wdfist/index.html?depth=3&language=en&project=wikipedia&sparql=SELECT%20?item%20WHERE%20{%20?item%20wdt:P31%20wd:Q5%20;%20wdt:P21%20wd:Q6581072%20;%20wdt:P106/wdt:P279*%20wd:Q901%20}%20LIMIT%2010&remove_used=1&remove_multiple=1&prefilled=1".to_string();
         let df = WdFistAdapter::default().source2file(&SourceId::WdFist(id), &header_mapping).await.unwrap();
         assert!(df.rows>1);
         APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
