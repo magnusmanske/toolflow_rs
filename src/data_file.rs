@@ -108,7 +108,6 @@ impl DataFile {
     pub fn open_input_file(&mut self, uuid: &str) -> Result<()> {
         self.uuid = Some(uuid.to_string());
         let path = self.path().expect("base name was just set, this should be impossible");
-        eprintln!("{path}");
         let file_handle = File::open(path)?;
         let reader = BufReader::new(file_handle);
         self.reader = Some(reader);
