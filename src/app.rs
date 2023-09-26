@@ -25,13 +25,17 @@ pub struct App {
 
 impl App {
     pub fn new() -> Self {
+        let runs_on_toolforge = std::env::var("USER")==Ok("tools.toolflow".to_string());
+        if runs_on_toolforge {
+            println!("Running on ToolForge");
+        }
         Self {
             pool: Pool::new(toolforge::db::toolsdb("s53704__toolflow".to_string())
                 .expect("unable to load db config")
                 .to_string()
                 .as_str(),),
             site_matrix: RwLock::new(HashMap::new()),
-            runs_on_toolforge: true,//std::path::Path::new("~/public_html").exists(),
+            runs_on_toolforge,
         }
     }
 
