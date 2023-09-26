@@ -1,4 +1,4 @@
-use std::{collections::HashMap, thread, time::{self, SystemTime}};
+use std::{collections::HashMap, thread, time::{self, SystemTime}, path::Path};
 use anyhow::{Result, anyhow};
 use mediawiki::api::Api;
 use regex::Regex;
@@ -31,7 +31,7 @@ impl App {
                 .to_string()
                 .as_str(),),
             site_matrix: RwLock::new(HashMap::new()),
-            runs_on_toolforge: std::env::var("USER")==Ok("tools.toolflow".to_string()),
+            runs_on_toolforge: Path::new("/data/project/toolflow/data").exists(), //std::env::var("USER")==Ok("tools.toolflow".to_string()),
         }
     }
 
