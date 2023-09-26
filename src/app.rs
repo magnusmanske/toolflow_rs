@@ -31,7 +31,7 @@ impl App {
                 .to_string()
                 .as_str(),),
             site_matrix: RwLock::new(HashMap::new()),
-            runs_on_toolforge: std::path::Path::new("~/public_html").exists(),
+            runs_on_toolforge: true,//std::path::Path::new("~/public_html").exists(),
         }
     }
 
