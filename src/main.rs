@@ -60,7 +60,7 @@ async fn main() -> Result<()> {
             // let _misc = sub_matches.get_one::<String>("misc").map(|s| s.as_str());
             match mode {
                 "wiki" => {
-                    let wikitext = RendererWikitext::default().render_from_uuid(uuid).expect("No data file for uuid {uuid}");
+                    let wikitext = RendererWikitext::default().render_from_uuid(uuid).expect(&format!("No data file for uuid {uuid}"));
                     println!("{wikitext}");
                 }
                 other => panic!("Render type '{other}' is not supported"),
