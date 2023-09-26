@@ -1,4 +1,4 @@
-use std::{collections::HashMap, thread, time::{self, SystemTime}, env};
+use std::{collections::HashMap, thread, time::{self, SystemTime}};
 use anyhow::{Result, anyhow};
 use mediawiki::api::Api;
 use regex::Regex;
@@ -20,6 +20,7 @@ lazy_static!{
 pub struct App {
     pool: Pool,
     site_matrix: RwLock<HashMap<String,Api>>,
+    runs_on_toolforge: bool,
 }
 
 impl App {
@@ -30,6 +31,7 @@ impl App {
                 .to_string()
                 .as_str(),),
             site_matrix: RwLock::new(HashMap::new()),
+            runs_on_toolforge: std::path::Path::new("~/public_html").exists(),
         }
     }
 
@@ -178,17 +180,12 @@ impl App {
     }
 
     pub fn data_path(&self) -> &str {
-        match env::current_dir() {
-            Ok(path) => {
-                if cfg!(test) {
-                    return "./test_data" // Testing
-                } else if path.to_string_lossy().contains("/project/") {
-                    "/data/project/toolflow/data"
-                } else {
-                    "./tmp" // Local box
-                }
-            },
-            Err(_) => "./tmp",
+        if cfg!(test) {
+            return "./test_data" // Testing
+        } else if self.runs_on_toolforge {
+            "/data/project/toolflow/data"
+        } else {
+            "./tmp" // Local box
         }
     }
 
