@@ -55,7 +55,7 @@ impl App {
             .map(|(_ns_id,v)| (v["id"].as_i64(),v["*"].as_str())) // Local namesapces
             .chain(si.iter().map(|(_ns_id,v)| (v["id"].as_i64(),v["canonical"].as_str()))) // Adding canonical namespaces
             .filter(|(ns_id,ns_name)|ns_id.is_some()&&ns_name.is_some())
-            .map(|(ns_id,ns_name)|(ns_id.unwrap(),ns_name.unwrap()))
+            .map(|(ns_id,ns_name)|(ns_id.unwrap(),ns_name.unwrap())) //unwrap()s are safe
             .filter(|(_ns_id,ns_name)| self.to_compare(ns_name)==ns_to_compare)
             .map(|(ns_id,_ns_name)|ns_id)
             .next()

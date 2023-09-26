@@ -25,7 +25,7 @@ impl Generator {
         // TODO replace old section
         let start = "<!--TOOLFLOW GENERATOR START-->";
         let end = "<!--TOOLFLOW GENERATOR END-->";
-        let re = RegexBuilder::new(&format!(r"(?s){start}.*{end}")).multi_line(true).crlf(true).build().unwrap();
+        let re = RegexBuilder::new(&format!(r"(?s){start}.*{end}")).multi_line(true).crlf(true).build()?;
         let replace_with = format!("{start}\n{wiki_table}\n{end}\n");
         let after = if re.is_match(&before) {
             re.replace_all(&before,replace_with.to_owned()).to_string()

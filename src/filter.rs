@@ -35,7 +35,7 @@ impl Filter {
                 Ok(r) => r,
                 Err(_) => return Err(anyhow!("Invalid regular expression: {}",&self.value)),
             }
-            _ => RegexBuilder::new(".").build().unwrap() // Dummy, never used
+            _ => RegexBuilder::new(".").build()?
         };
             
         let v_plain_text = DataCell::PlainText(self.value.to_owned());
