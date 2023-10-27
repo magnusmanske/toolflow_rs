@@ -1,8 +1,9 @@
 use anyhow::{Result,anyhow};
 use regex::RegexBuilder;
 use serde::{Serialize, Deserialize};
-use serde_json::json;
+use serde_json::{json, Value};
 
+use crate::app::App;
 use crate::data_cell::DataCell;
 use crate::data_file::{DataFileDetails, DataFile};
 
@@ -98,6 +99,105 @@ impl Filter {
 }
 
 
+// ____________________________________________________________________________________
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterPetScan {
+    pub key: String,
+    pub psid: u64,
+}
+
+impl FilterPetScan {
+    pub async fn process(&self, uuid: &str) -> Result<DataFileDetails> {
+        // let v_regexp = match self.operator {
+        //     FilterOperator::Regexp => match RegexBuilder::new(&self.value).build() {
+        //         Ok(r) => r,
+        //         Err(_) => return Err(anyhow!("Invalid regular expression: {}",&self.value)),
+        //     }
+        //     _ => RegexBuilder::new(".").build()?
+        // };
+            
+        // let v_plain_text = DataCell::PlainText(self.value.to_owned());
+        // let v_i64 = DataCell::Int(self.value.parse::<i64>().unwrap_or(0));
+        // let v_f64 = DataCell::Float(self.value.parse::<f64>().unwrap_or(0.0));
+
+
+        // Get page list
+        let mut pages = vec![];
+        let mut df_in = DataFile::default();
+        df_in.open_input_file(uuid)?;
+        df_in.load_header()?;
+        let col_num = df_in.header().columns.iter()
+            .enumerate()
+            .find(|(_col_num,h)|h.name==self.key)
+            .map(|(col_num,_h)|col_num)
+            .ok_or_else(||anyhow!("File {uuid} does not have a header column {}",self.key))?;
+        loop {
+            let row = match df_in.read_row() {
+                Some(row) => row,
+                None => break, // End of file
+            };
+            let row: Vec<DataCell> = serde_json::from_str(&row)?;
+            let cell = row.get(col_num);
+            let wiki_page = match cell {
+                Some(cell) => match cell {
+                    DataCell::WikiPage(wp) => wp,
+                    _ => continue,
+                },
+                None => continue,
+            };
+            let page = match &wiki_page.prefixed_title {
+                Some(page) => page,
+                None => continue,
+            };
+            pages.push(page.to_owned());
+        }
+
+        let url = format!("https://petscan.wmflabs.org/?psid={}&format=json&output_compatability=quick-intersection&sparse=1",self.psid);
+        let pages = pages.join("\n");
+        let manual_list_wiki = "wikidatawiki".to_string(); // TODO FIXME from input header
+        let client = App::reqwest_client()?;
+        let params = [("manual_list", &pages), ("manual_list_wiki", &manual_list_wiki)];
+        let j: Value = client.post(url).form(&params).send().await?.json().await?;
+        let pages: Vec<String> = j.get("pages").ok_or(anyhow!("PetScan PSID {} fail: no pages key in JSON",self.psid))?
+            .as_array().ok_or(anyhow!("PetScan PSID {} fail: pages is not an array",self.psid))?
+            .iter().filter_map(|v|v.as_str()).map(|s|s.to_string()).collect();
+
+        let mut df_out = DataFile::new_output_file()?;
+        let mut df_in = DataFile::default();
+        df_in.open_input_file(uuid)?;
+        df_in.load_header()?;
+        df_out.write_json_row(&json!{df_in.header()})?; // Output new header
+        loop {
+            let row = match df_in.read_row() {
+                Some(row) => row,
+                None => break, // End of file
+            };
+            let row: Vec<DataCell> = serde_json::from_str(&row)?;
+            let cell = row.get(col_num);
+            let wiki_page = match cell {
+                Some(cell) => match cell {
+                    DataCell::WikiPage(wp) => wp,
+                    _ => continue,
+                },
+                None => continue,
+            };
+            let page = match &wiki_page.prefixed_title {
+                Some(page) => page,
+                None => continue,
+            };
+            if pages.contains(page) {
+                df_out.write_json_row(&json!{row})?; // Output data row
+            }
+        }
+        Ok(df_out.details())
+    }
+}
+
+
+
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,4 +246,17 @@ mod tests {
         let operator: FilterOperator = serde_json::from_str(&operator).unwrap();
         assert_eq!(operator,FilterOperator::Equal);
     }
+
+    #[tokio::test]
+    async fn test_filter_petscan() {
+        let uuid = "8c5d1fb3-6ea8-44d1-b938-9d22f569c412";
+        let filter = FilterPetScan {
+            key: "wikidata_item".to_string(), 
+            psid: 26256139,
+        };
+        let df = filter.process(uuid).await.unwrap();
+        assert!(df.rows==34);
+        APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
+    }
+
 }
