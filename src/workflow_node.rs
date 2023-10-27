@@ -13,6 +13,7 @@ pub enum WorkflowNodeKind {
     PetScan,
     PagePile,
     AListBuildingTool,
+    UserEdits,
     WdFist,
     Join,
     Filter,
@@ -54,6 +55,10 @@ impl WorkflowNode {
                 let qid = self.param_string("qid")?;
                 let id = (wiki,qid);
                 AListBuildingToolAdapter::default().source2file(&&SourceId::AListBuildingTool(id), &self.header_mapping).await
+            },
+            WorkflowNodeKind::UserEdits => {
+                let url = self.param_string("user_edits_url")?;
+                UserEditsAdapter::default().source2file(&&SourceId::UserEdits(url), &self.header_mapping).await
             },
             WorkflowNodeKind::Join => {
                 let mode = self.param_string("mode")?;

@@ -10,6 +10,7 @@ pub enum SourceId {
     PagePile(u64),
     AListBuildingTool((String,String)),
     WdFist(String),
+    UserEdits(String),
 }
 
 

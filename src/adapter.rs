@@ -428,6 +428,99 @@ impl Adapter for WdFistAdapter {
     }
 }
 
+
+
+
+#[derive(Debug, Default)]
+struct UserEditsParams {
+    sparql: Option<String>,
+    pattern: Option<String>,
+    user: String,
+    only_page_creations: bool,
+    start: Option<String>,
+    end: Option<String>,
+}
+
+impl UserEditsParams {
+    fn from_url(url: &Url) -> Result<Self> {
+        if url.host_str()!=Some("wikidata-todo.toolforge.org") { // TODO || url.path()!="/user_edits.php"
+            return Err(anyhow!("Not a UserEdits URL: {url}"));
+        }
+        let mut ret = Self::default();
+        url.query_pairs().for_each(|(k,v)|{
+            match k.as_ref() {
+                "sparql" => ret.sparql = Some(v.to_string()),
+                "pattern" => ret.pattern = Some(v.to_string()),
+                "user" => ret.user = v.to_string(),
+                "only_page_creations" => ret.only_page_creations = v.parse::<u8>().unwrap_or(0)==1,
+                "start" => ret.start = Some(v.to_string()),
+                "end" => ret.end = Some(v.to_string()),
+                _ => {} // Ignore
+            }
+        });
+        Ok(ret)
+    }
+
+    fn to_url(&self) -> String {
+        let mut params : Vec<(String,String)> = vec![];
+        params.push(("user".to_string(),self.user.to_string()));
+        params.push(("doit".to_string(),"1".to_string()));
+        params.push(("format".to_string(),"jsonl".to_string()));
+        if let Some(value) = &self.sparql {
+            params.push(("sparql".to_string(),value.to_owned()));
+        }
+        if let Some(value) = &self.pattern {
+            params.push(("pattern".to_string(),value.to_owned()));
+        }
+        if let Some(value) = &self.start {
+            params.push(("start".to_string(),value.to_owned()));
+        }
+        if let Some(value) = &self.end {
+            params.push(("end".to_string(),value.to_owned()));
+        }
+        if self.only_page_creations {
+            params.push(("only_page_creations".to_string(),"1".to_string()));
+        }
+
+        let url = Url::parse_with_params("https://wikidata-todo.toolforge.org/user_edits.php",&params).expect("Hardcoded UserEdits URL failed");
+        url.to_string()
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct UserEditsAdapter {
+}
+
+#[async_trait]
+impl Adapter for UserEditsAdapter {
+    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+        let url = match source {
+            SourceId::UserEdits(url) => Url::parse(url)?,
+            _ => return Err(anyhow!("Unsuitable source type for UserEdits: {source:?}")),
+        };
+        let user_edits = UserEditsParams::from_url(&url)?;
+        let user_edits_url = user_edits.to_url();
+
+        let result: String = App::reqwest_client()?.get(user_edits_url).send().await?.text().await?;
+        
+        let mut file = DataFile::new_output_file()?;
+        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
+
+        for s in result.split("\n") {
+            let j: Value = match serde_json::from_str(s) {
+                Ok(j) => j,
+                Err(_) => continue, // TODO log error?
+            };
+            let mut wp = WikiPage::new_wikidata_item();
+            wp.prefixed_title = Some(j.get("page_title").unwrap().as_str().unwrap().to_string());
+            let jsonl_row = vec![DataCell::WikiPage(wp)];
+            file.write_json_row(&json!{jsonl_row})?; // Output data row
+        }
+
+        Ok(file.details())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -473,4 +566,15 @@ mod tests {
         assert!(df.rows>1);
         APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
     }
+
+    #[tokio::test]
+    async fn test_adapter_user_edits() {
+        let j = json!({"data": [{"header": {"kind": {"WikiPage": {"ns_id": 0,"ns_prefix": null,"page_id": null,"prefixed_title": null,"title": null,"wiki": "wikidatawiki"}},"name": "wikidata_item"},"mapping": []}]});
+        let header_mapping: HeaderMapping = serde_json::from_str(&j.to_string()).unwrap();
+        let id = "https://wikidata-todo.toolforge.org/user_edits.php?sparql=&pattern=&user=Naive+rm&start=&end=&only_page_creations=1&doit=Do+it&format=html".to_string();
+        let df = UserEditsAdapter::default().source2file(&SourceId::UserEdits(id), &header_mapping).await.unwrap();
+        assert!(df.rows>3300);
+        APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
+    }
+
 }
