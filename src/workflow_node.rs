@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{filter::Filter, mapping::{HeaderMapping, SourceId}, adapter::*, data_file::DataFileDetails, join::Join, generator::Generator, renderer::{RendererWikitext, Renderer}};
+use crate::{filter::{Filter, FilterPetScan}, mapping::{HeaderMapping, SourceId}, adapter::*, data_file::DataFileDetails, join::Join, generator::Generator, renderer::{RendererWikitext, Renderer}};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +17,7 @@ pub enum WorkflowNodeKind {
     WdFist,
     Join,
     Filter,
+    FilterPetScan,
     Generator,
 }
 
@@ -90,6 +91,18 @@ impl WorkflowNode {
                     0 => Err(anyhow!("Filter has no input")),
                     1 => filter.process(&uuids[0]).await,
                     other => Err(anyhow!("Filter has {other} inputs, should only have one")),
+                }
+            },
+            WorkflowNodeKind::FilterPetScan => {
+                let filter = FilterPetScan {
+                    key: self.param_string("key")?,
+                    psid: self.param_u64("psid")?,
+                };
+                let uuids: Vec<&str> = input.iter().map(|(_slot,uuid)|uuid.as_str()).collect();
+                match uuids.len() {
+                    0 => Err(anyhow!("Filter has no input")),
+                    1 => filter.process(&uuids[0]).await,
+                    other => Err(anyhow!("FilterPetScan has {other} inputs, should only have one")),
                 }
             },
             WorkflowNodeKind::Generator => {
