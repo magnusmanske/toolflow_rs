@@ -202,7 +202,58 @@ impl FilterPetScan {
 }
 
 
+// ____________________________________________________________________________________
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FilterSort {
+    pub key: String,
+    pub reverse: bool,
+}
+
+impl FilterSort {
+    pub async fn process(&self, uuid: &str) -> Result<DataFileDetails> {
+        let mut df_in = DataFile::default();
+        df_in.open_input_file(uuid)?;
+        df_in.load_header()?;
+
+        let col_num = df_in.header().columns.iter()
+            .enumerate()
+            .find(|(_col_num,h)|h.name==self.key)
+            .map(|(col_num,_h)|col_num)
+            .ok_or_else(||anyhow!("File {uuid} does not have a header column {}",self.key))?;
+
+        // Read rows
+        let mut rows = vec![];
+        loop {
+            let row = match df_in.read_row() {
+                Some(row) => row,
+                None => break, // End of file
+            };
+            let row: Vec<DataCell> = serde_json::from_str(&row)?;
+            rows.push(row);
+        }
+
+        // Sort rows
+        rows.sort_by_cached_key(|row| {
+            let cell = match row.get(col_num) {
+                Some(cell) => cell,
+                None => return String::default(),
+            };
+            cell.as_key()
+        });
+        if self.reverse {
+            rows.reverse();
+        }
+
+        // Write sorted rows
+        let mut df_out = DataFile::new_output_file()?;
+        df_out.write_json_row(&json!{df_in.header()})?; // Output new header
+        for row in rows {
+            df_out.write_json_row(&json!{row})?; // Output data row
+        }
+        Ok(df_out.details())
+    }
+}
 
 
 #[cfg(test)]

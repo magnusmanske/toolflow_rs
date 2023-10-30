@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::{filter::{Filter, FilterPetScan}, mapping::{HeaderMapping, SourceId}, adapter::*, data_file::DataFileDetails, join::Join, generator::Generator, renderer::{RendererWikitext, Renderer}};
+use crate::{filter::{Filter, FilterPetScan, FilterSort}, mapping::{HeaderMapping, SourceId}, adapter::*, data_file::DataFileDetails, join::Join, generator::Generator, renderer::{RendererWikitext, Renderer}};
 
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -18,6 +18,7 @@ pub enum WorkflowNodeKind {
     Join,
     Filter,
     FilterPetScan,
+    FilterSort,
     Generator,
 }
 
@@ -93,6 +94,18 @@ impl WorkflowNode {
                     other => Err(anyhow!("Filter has {other} inputs, should only have one")),
                 }
             },
+            WorkflowNodeKind::FilterSort => {
+                let filter = FilterSort {
+                    key: self.param_string("key")?,
+                    reverse: self.param_bool("reverse")?,//self.param_u64("reverse")?>0,
+                };
+                let uuids: Vec<&str> = input.iter().map(|(_slot,uuid)|uuid.as_str()).collect();
+                match uuids.len() {
+                    0 => Err(anyhow!("FilterSort has no input")),
+                    1 => filter.process(&uuids[0]).await,
+                    other => Err(anyhow!("FilterSort has {other} inputs, should only have one")),
+                }
+            },
             WorkflowNodeKind::FilterPetScan => {
                 let filter = FilterPetScan {
                     key: self.param_string("key")?,
@@ -100,7 +113,7 @@ impl WorkflowNode {
                 };
                 let uuids: Vec<&str> = input.iter().map(|(_slot,uuid)|uuid.as_str()).collect();
                 match uuids.len() {
-                    0 => Err(anyhow!("Filter has no input")),
+                    0 => Err(anyhow!("FilterPetScan has no input")),
                     1 => filter.process(&uuids[0]).await,
                     other => Err(anyhow!("FilterPetScan has {other} inputs, should only have one")),
                 }
