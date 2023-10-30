@@ -511,9 +511,34 @@ impl Adapter for UserEditsAdapter {
                 Ok(j) => j,
                 Err(_) => continue, // TODO log error?
             };
-            let mut wp = WikiPage::new_wikidata_item();
-            wp.prefixed_title = Some(j.get("page_title").unwrap().as_str().unwrap().to_string());
-            let jsonl_row = vec![DataCell::WikiPage(wp)];
+            let mut jsonl_row = vec![];
+            for cm in &mapping.data {
+                match &cm.header.kind {
+                    crate::data_header::ColumnHeaderType::PlainText => {
+                        match cm.mapping.get(0) {
+                            Some((from,_to)) => {
+                                match j.get(from) {
+                                    Some(data) => {
+                                        match data.as_str() {
+                                            Some(s) => jsonl_row.push(DataCell::PlainText(s.to_string())),
+                                            None => jsonl_row.push(DataCell::Blank),
+                                        }
+                                    },
+                                    None => jsonl_row.push(DataCell::Blank),
+                                }
+                            },
+                            None => jsonl_row.push(DataCell::Blank),
+                        }
+                    },
+                    crate::data_header::ColumnHeaderType::WikiPage(_) => {
+                        let mut wp = WikiPage::new_wikidata_item();
+                        wp.prefixed_title = Some(j.get("page_title").unwrap().as_str().unwrap().to_string());
+                        jsonl_row.push(DataCell::WikiPage(wp));
+                    },
+                    crate::data_header::ColumnHeaderType::Int => return Err(anyhow!("Unsupported type for UserEdits: Int")),
+                    crate::data_header::ColumnHeaderType::Float => return Err(anyhow!("Unsupported type for UserEdits: Float")),
+                }
+            }
             file.write_json_row(&json!{jsonl_row})?; // Output data row
         }
 
@@ -569,7 +594,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_adapter_user_edits() {
-        let j = json!({"data": [{"header": {"kind": {"WikiPage": {"ns_id": 0,"ns_prefix": null,"page_id": null,"prefixed_title": null,"title": null,"wiki": "wikidatawiki"}},"name": "wikidata_item"},"mapping": []}]});
+        let j = json!({"data": [
+            {"header": {"kind": {"WikiPage": {"ns_id": 0,"ns_prefix": null,"page_id": null,"prefixed_title": null,"title": null,"wiki": "wikidatawiki"}},"name": "wikidata_item"},"mapping": []},
+            {"header": {"kind": "PlainText","name": "timestamp"},"mapping": [["rev_timestamp","timestamp"]]}
+            ]});
         let header_mapping: HeaderMapping = serde_json::from_str(&j.to_string()).unwrap();
         let id = "https://wikidata-todo.toolforge.org/user_edits.php?sparql=&pattern=&user=Naive+rm&start=&end=&only_page_creations=1&doit=Do+it&format=html".to_string();
         let df = UserEditsAdapter::default().source2file(&SourceId::UserEdits(id), &header_mapping).await.unwrap();
