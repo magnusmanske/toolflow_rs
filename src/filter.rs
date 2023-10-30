@@ -109,19 +109,6 @@ pub struct FilterPetScan {
 
 impl FilterPetScan {
     pub async fn process(&self, uuid: &str) -> Result<DataFileDetails> {
-        // let v_regexp = match self.operator {
-        //     FilterOperator::Regexp => match RegexBuilder::new(&self.value).build() {
-        //         Ok(r) => r,
-        //         Err(_) => return Err(anyhow!("Invalid regular expression: {}",&self.value)),
-        //     }
-        //     _ => RegexBuilder::new(".").build()?
-        // };
-            
-        // let v_plain_text = DataCell::PlainText(self.value.to_owned());
-        // let v_i64 = DataCell::Int(self.value.parse::<i64>().unwrap_or(0));
-        // let v_f64 = DataCell::Float(self.value.parse::<f64>().unwrap_or(0.0));
-
-
         // Get page list
         let mut pages = vec![];
         let mut df_in = DataFile::default();
@@ -153,12 +140,32 @@ impl FilterPetScan {
             pages.push(page.to_owned());
         }
 
-        let url = format!("https://petscan.wmflabs.org/?psid={}&format=json&output_compatability=quick-intersection&sparse=1",self.psid);
+        // Get wiki
+        let header = match df_in.header().columns.get(col_num) {
+            Some(h) => h,
+            None => return Err(anyhow!("File {uuid} does not have a header column {}",self.key)),
+        };
+        let manual_list_wiki = match &header.kind {
+            crate::data_header::ColumnHeaderType::WikiPage(wp) => match &wp.wiki {
+                Some(wiki) => wiki.to_owned(),
+                None => return Err(anyhow!("No wiki set for column {}",self.key)),
+            }
+            _ => return Err(anyhow!("Not a wiki column for {}",self.key)),
+        };
+
+        // Query PetScan
+        let url = "https://petscan.wmflabs.org";
         let pages = pages.join("\n");
-        let manual_list_wiki = "wikidatawiki".to_string(); // TODO FIXME from input header
-        let client = App::reqwest_client()?;
-        let params = [("manual_list", &pages), ("manual_list_wiki", &manual_list_wiki)];
-        let j: Value = client.post(url).form(&params).send().await?.json().await?;
+        let psid = format!("{}",self.psid);
+        let params = [
+            ("psid",psid.as_str()),
+            ("format","json"),
+            ("output_compatability","quick-intersection"),
+            ("sparse","1"),
+            ("manual_list_wiki",&manual_list_wiki),
+            ("manual_list", &pages)
+            ];
+        let j: Value = App::reqwest_client()?.post(url).form(&params).send().await?.json().await?;
         let pages: Vec<String> = j.get("pages").ok_or(anyhow!("PetScan PSID {} fail: no pages key in JSON",self.psid))?
             .as_array().ok_or(anyhow!("PetScan PSID {} fail: pages is not an array",self.psid))?
             .iter().filter_map(|v|v.as_str()).map(|s|s.to_string()).collect();
