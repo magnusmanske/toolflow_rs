@@ -143,12 +143,21 @@ impl WorkflowNode {
     }
 
     fn param_u64(&self, key: &str) -> Result<u64> {
+        if let Some(ret) = self.param(key)?.as_u64() {
+            return Ok(ret);
+        }
         let ret = self.param(key)?.as_str().map(|s|s.parse::<u64>().ok());
         let ret = ret.ok_or_else(||anyhow!("Parameter '{key}' not a str"))?;
         ret.ok_or_else(||anyhow!("Parameter '{key}' not a u64"))
     }
 
     fn param_bool(&self, key: &str) -> Result<bool> {
-        self.param(key)?.as_bool().ok_or_else(||anyhow!("Parameter '{key}' not a boolean"))
+        if let Some(ret) = self.param(key)?.as_bool() {
+            return Ok(ret);
+        }
+        if let Ok(ret) = self.param_u64(key) {
+            return Ok(ret>0);
+        }
+        Err(anyhow!("Parameter '{key}' not a boolean or u64"))
     }
 }

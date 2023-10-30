@@ -317,4 +317,34 @@ mod tests {
         APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
     }
 
+    #[tokio::test]
+    async fn test_filter_sort() {
+        async fn sub_test(reverse: bool, expected_first_item: &str) {
+            let uuid = "8c5d1fb3-6ea8-44d1-b938-9d22f569c412";
+            let filter = FilterSort {
+                key: "wikidata_item".to_string(), 
+                reverse,
+            };
+            let df = filter.process(uuid).await.unwrap();
+            // println!("Generated test_data/{}.jsonl with {} rows",df.uuid,df.rows);
+            assert!(df.rows==50);
+            if true {
+                let mut df_in = DataFile::default();
+                df_in.open_input_file(&df.uuid).expect(&format!("New data file missing: {}",df.uuid));
+                let _ = df_in.read_row().expect(&format!("Header row missing for {}",df.uuid));
+                let row = df_in.read_row().expect(&format!("First data row missing for {}",df.uuid));
+                let row: Vec<DataCell> = serde_json::from_str(&row).expect("First data row is not JSON");
+                let cell = match &row[0] {
+                    DataCell::WikiPage(wp) => wp.to_owned(),
+                    _ => panic!("Sort failed"),
+                };
+                assert_eq!(cell.prefixed_title.unwrap(),expected_first_item);
+            }
+            APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
+        }
+
+        sub_test(true, "Q99929855").await;
+        sub_test(false, "Q18619644").await;
+    }
+
 }
