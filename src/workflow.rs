@@ -1,9 +1,14 @@
-use toolforge::pool::mysql_async::prelude::*;
+use crate::{
+    data_file::DataFileDetails,
+    workflow_node::WorkflowNode,
+    workflow_run::{WorkflowNodeStatusValue, WorkflowRun},
+    APP,
+};
 use anyhow::{anyhow, Result};
-use std::collections::HashMap;
 use futures::future::join_all;
+use mysql_async::{from_row, prelude::*};
 use serde::{Deserialize, Serialize};
-use crate::{APP, workflow_run::{WorkflowRun, WorkflowNodeStatusValue}, workflow_node::WorkflowNode, data_file::DataFileDetails};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NodeInput {
@@ -77,20 +82,26 @@ impl Workflow {
     }
 
     pub async fn from_id(workflow_id: usize) -> Result<Self> {
-        let conn = APP.get_db_connection().await?;
-        let (name, mut ret,state, user_id) = format!("SELECT `name`,`json`,`state`,`user_id` FROM `workflow` WHERE `id`={workflow_id}")
-            .with(())
-            .map(conn, |x:(String,String,String,usize)| (
+        let sql = "SELECT `name`,`json`,`state`,`user_id` FROM `workflow` WHERE `id`=:workflow_id";
+        let mut conn = APP.get_db_connection().await?;
+        let (name, mut ret, state, user_id) = conn
+            .exec_iter(sql, params!(workflow_id))
+            .await?
+            .map_and_drop(from_row::<(String, String, String, usize)>)
+            .await?
+            .iter()
+            .map(|x| {
+                (
                     x.0.to_owned(),
                     serde_json::from_str::<Self>(&x.1).unwrap(),
                     WorkflowState::from_str(&x.2).unwrap_or_default(),
                     x.3,
-                ) )
-            .await?
-            .pop()
-            .ok_or_else(||anyhow!("No workflow with id {workflow_id}"))?;
+                )
+            })
+            .next()
+            .ok_or_else(|| anyhow!("No workflow with id {workflow_id}"))?;
         ret.id = workflow_id;
-        ret.name = name;
+        ret.name = name.to_owned();
         ret.state = state;
         ret.user_id = user_id;
         ret.run = WorkflowRun::new(&ret);
@@ -106,60 +117,104 @@ impl Workflow {
                 break;
             }
 
-            let mut inputs: HashMap<usize,HashMap<usize,String>> = nodes_to_run.iter().map(|node_id| (*node_id,HashMap::new())).collect();
-            self.edges.iter()
-                .filter(|edge|nodes_to_run.contains(&edge.target_node))
-                .map(|edge|NodeInput{node_id: edge.target_node, uuid: self.run.get_node_status(edge.source_node).uuid().to_string(), slot:edge.target_slot})
-                .for_each(|i| { let _ = inputs.entry(i.node_id).or_default().insert(i.slot,i.uuid.to_owned()); } );
+            let mut inputs: HashMap<usize, HashMap<usize, String>> = nodes_to_run
+                .iter()
+                .map(|node_id| (*node_id, HashMap::new()))
+                .collect();
+            self.edges
+                .iter()
+                .filter(|edge| nodes_to_run.contains(&edge.target_node))
+                .map(|edge| NodeInput {
+                    node_id: edge.target_node,
+                    uuid: self
+                        .run
+                        .get_node_status(edge.source_node)
+                        .uuid()
+                        .to_string(),
+                    slot: edge.target_slot,
+                })
+                .for_each(|i| {
+                    let _ = inputs
+                        .entry(i.node_id)
+                        .or_default()
+                        .insert(i.slot, i.uuid.to_owned());
+                });
 
-            let futures: Vec<_> = nodes_to_run.iter().map(|node_id|self.nodes[*node_id].run(inputs.get(node_id).unwrap(), self.user_id)).collect();
+            let futures: Vec<_> = nodes_to_run
+                .iter()
+                .map(|node_id| self.nodes[*node_id].run(inputs.get(node_id).unwrap(), self.user_id))
+                .collect();
             let results = join_all(futures).await;
 
             // Set error for all nodes
-            results.iter()
+            results
+                .iter()
                 .zip(nodes_to_run.iter())
-                .for_each(|(result,node_id)| {
+                .for_each(|(result, node_id)| {
                     if let Err(e) = result {
-                        self.run.get_node_status_mut(*node_id).set_status(WorkflowNodeStatusValue::FAILED,Some(e.to_string()));
+                        self.run
+                            .get_node_status_mut(*node_id)
+                            .set_status(WorkflowNodeStatusValue::FAILED, Some(e.to_string()));
                     } else {
-                        self.run.get_node_status_mut(*node_id).set_status(WorkflowNodeStatusValue::DONE,None);
+                        self.run
+                            .get_node_status_mut(*node_id)
+                            .set_status(WorkflowNodeStatusValue::DONE, None);
                     }
                 });
 
             // Fail on first error
-            if let Some(error_result) = results.iter().filter(|r|r.is_err()).next() {
+            if let Some(error_result) = results.iter().filter(|r| r.is_err()).next() {
                 if let Err(e) = error_result {
-                    self.run.update_status(WorkflowNodeStatusValue::FAILED, &mut APP.get_db_connection().await?).await?;
+                    self.run
+                        .update_status(
+                            WorkflowNodeStatusValue::FAILED,
+                            &mut APP.get_db_connection().await?,
+                        )
+                        .await?;
                     return Err(anyhow!(e.to_string()));
                 }
             }
 
-            let node_file: Vec<(usize,DataFileDetails)> = results.into_iter()
-                .filter_map(|r|r.ok()) // Already checked they are all OK
+            let node_file: Vec<(usize, DataFileDetails)> = results
+                .into_iter()
+                .filter_map(|r| r.ok()) // Already checked they are all OK
                 .enumerate()
-                .map(|(num,dfd)|(nodes_to_run[num],dfd)) // TODO FIXME
+                .map(|(num, dfd)| (nodes_to_run[num], dfd)) // TODO FIXME
                 .collect();
-            
+
             let mut conn = APP.get_db_connection().await?;
             if self.run.is_cancelled(&mut conn).await? {
                 return Err(anyhow!("User cancelled run"));
             }
-            for (node_id,dfd) in node_file {
+            for (node_id, dfd) in node_file {
                 if !dfd.is_valid() {
                     continue; // TODO is this the right thing to do?
                 }
                 let is_output_node = self.run.is_output_node(node_id);
-                let end_time = if is_output_node { "null" } else { "NOW() + INTERVAL 1 HOUR" };
+                let end_time = if is_output_node {
+                    "null"
+                } else {
+                    "NOW() + INTERVAL 1 HOUR"
+                };
                 format!("INSERT INTO `file` (`uuid`,`expires`,`run_id`,`node_id`,`is_output`,`rows`) VALUES (?,{end_time},?,?,?,?)")
                     .with((dfd.uuid.to_owned(),run_id,node_id,is_output_node,dfd.rows))
                     .run(&mut conn)
                     .await?;
-                self.run.get_node_status_mut(node_id).done_with_uuid(&dfd.uuid);
+                self.run
+                    .get_node_status_mut(node_id)
+                    .done_with_uuid(&dfd.uuid);
             }
-            self.run.update_status(WorkflowNodeStatusValue::RUNNING, &mut conn).await?;
+            self.run
+                .update_status(WorkflowNodeStatusValue::RUNNING, &mut conn)
+                .await?;
         }
 
-        self.run.update_status(WorkflowNodeStatusValue::DONE, &mut APP.get_db_connection().await?).await?;
+        self.run
+            .update_status(
+                WorkflowNodeStatusValue::DONE,
+                &mut APP.get_db_connection().await?,
+            )
+            .await?;
 
         Ok(())
     }
@@ -169,19 +224,21 @@ impl Workflow {
     }
 
     fn node_open_dependencies(&self, node_id: usize) -> usize {
-        self.edges.iter()
-            .filter(|edge| edge.target_node==node_id)
+        self.edges
+            .iter()
+            .filter(|edge| edge.target_node == node_id)
             .filter(|edge| !self.run.get_node_status(edge.source_node).is_done())
             .count()
     }
 
     pub fn get_next_nodes_to_run(&self) -> Vec<usize> {
-        self.nodes.iter()
+        self.nodes
+            .iter()
             .enumerate()
-            .map(|(node_id,_)| self.run.get_node_status(node_id))
+            .map(|(node_id, _)| self.run.get_node_status(node_id))
             .filter(|node_status| node_status.is_waiting())
-            .filter(|node_status| self.node_open_dependencies(node_status.node_id)==0)
-            .map(|node_status|node_status.node_id)
+            .filter(|node_status| self.node_open_dependencies(node_status.node_id) == 0)
+            .map(|node_status| node_status.node_id)
             .collect()
     }
 }

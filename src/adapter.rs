@@ -1,9 +1,12 @@
-use std::collections::HashMap;
-use tempfile::*;
-use std::{fs::File, io::{Write, Seek}};
-use async_trait::async_trait;
 use anyhow::{anyhow, Result};
-use serde_json::{Value, json};
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::{
+    fs::File,
+    io::{Seek, Write},
+};
+use tempfile::*;
 use url::Url;
 
 use crate::app::App;
@@ -41,25 +44,29 @@ Candidate tools: (see also https://tool-watch.toolforge.org/ )
 - https://item-quality-evaluator.toolforge.org (to add scores)
 */
 
-
 #[async_trait]
 pub trait Adapter {
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails>;
+    async fn source2file(
+        &mut self,
+        source: &SourceId,
+        mapping: &HeaderMapping,
+    ) -> Result<DataFileDetails>;
 }
-
 
 #[derive(Debug, Default)]
-pub struct SparqlAdapter {
-}
+pub struct SparqlAdapter {}
 
 impl SparqlAdapter {
     /// Queries SPARQL and returns a filename with the result as CSV.
     pub async fn load_sparql_csv(&self, sparql: &str) -> Result<csv::Reader<File>> {
-        let url = format!("https://query.wikidata.org/sparql?query={}",sparql);
+        let url = format!("https://query.wikidata.org/sparql?query={}", sparql);
         let mut f = tempfile()?;
         let mut res = App::reqwest_client()?
             .get(url)
-            .header(reqwest::header::ACCEPT, reqwest::header::HeaderValue::from_str("text/csv")?)
+            .header(
+                reqwest::header::ACCEPT,
+                reqwest::header::HeaderValue::from_str("text/csv")?,
+            )
             .send()
             .await?;
         while let Some(chunk) = res.chunk().await? {
@@ -76,18 +83,26 @@ impl SparqlAdapter {
 
 #[async_trait]
 impl Adapter for SparqlAdapter {
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+    async fn source2file(
+        &mut self,
+        source: &SourceId,
+        mapping: &HeaderMapping,
+    ) -> Result<DataFileDetails> {
         let sparql = match source {
             SourceId::Sparql(sparql) => sparql,
             _ => return Err(anyhow!("Unsuitable source type for SPARQL: {source:?}")),
         };
         let mut reader = self.load_sparql_csv(&sparql).await?;
-        let labels: Vec<String> = reader.headers()?.iter().map(|s|s.to_string()).collect();
-        let label2col_num: HashMap<String,usize> = labels.into_iter().enumerate().map(|(colnum,header)|(header,colnum)).collect();
+        let labels: Vec<String> = reader.headers()?.iter().map(|s| s.to_string()).collect();
+        let label2col_num: HashMap<String, usize> = labels
+            .into_iter()
+            .enumerate()
+            .map(|(colnum, header)| (header, colnum))
+            .collect();
 
         let mut file = DataFile::new_output_file()?;
-        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
-        
+        file.write_json_row(&json! {mapping.as_data_header()})?; // Output new header
+
         for result in reader.records() {
             let row = match result {
                 Ok(row) => row,
@@ -96,11 +111,11 @@ impl Adapter for SparqlAdapter {
 
             let mut jsonl_row = vec![];
             for cm in &mapping.data {
-                if let Some((source_label,element_name)) = cm.mapping.get(0) {
+                if let Some((source_label, element_name)) = cm.mapping.get(0) {
                     if let Some(col_num) = label2col_num.get(source_label) {
                         if let Some(text) = row.get(*col_num) {
                             let j = json!(text);
-                            let dc = DataCell::from_value(&j,&cm.header, &element_name).await;
+                            let dc = DataCell::from_value(&j, &cm.header, &element_name).await;
                             jsonl_row.push(dc);
                             continue;
                         }
@@ -108,42 +123,62 @@ impl Adapter for SparqlAdapter {
                 }
                 jsonl_row.push(None);
             }
-            file.write_json_row(&json!{jsonl_row})?; // Output data row
+            file.write_json_row(&json! {jsonl_row})?; // Output data row
         }
         Ok(file.details())
     }
 }
 
-
 // Latest result for a given query ID
 #[derive(Debug, Default)]
-pub struct QuarryQueryAdapter {
-}
+pub struct QuarryQueryAdapter {}
 
 #[async_trait]
 impl Adapter for QuarryQueryAdapter {
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+    async fn source2file(
+        &mut self,
+        source: &SourceId,
+        mapping: &HeaderMapping,
+    ) -> Result<DataFileDetails> {
         let url = match source {
-            SourceId::QuarryQueryLatest(id) => format!("https://quarry.wmcloud.org/query/{id}/result/latest/0/json"),
-            _ => return Err(anyhow!("Unsuitable source type for Quarry query: {source:?}")),
+            SourceId::QuarryQueryLatest(id) => {
+                format!("https://quarry.wmcloud.org/query/{id}/result/latest/0/json")
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Unsuitable source type for Quarry query: {source:?}"
+                ))
+            }
         };
-        let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;        
-        let labels: Vec<String> = j["headers"].as_array().ok_or(anyhow!("JSON has no header array"))?.iter().map(|s|s.as_str().unwrap_or("").to_string()).collect();
-        let label2col_num: HashMap<String,usize> = labels.into_iter().enumerate().map(|(colnum,header)|(header,colnum)).collect();
-        
+        let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;
+        let labels: Vec<String> = j["headers"]
+            .as_array()
+            .ok_or(anyhow!("JSON has no header array"))?
+            .iter()
+            .map(|s| s.as_str().unwrap_or("").to_string())
+            .collect();
+        let label2col_num: HashMap<String, usize> = labels
+            .into_iter()
+            .enumerate()
+            .map(|(colnum, header)| (header, colnum))
+            .collect();
+
         let mut file = DataFile::new_output_file()?;
-        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
-        for row in j["rows"].as_array().ok_or(anyhow!("JSON has no rows array"))? {
+        file.write_json_row(&json! {mapping.as_data_header()})?; // Output new header
+        for row in j["rows"]
+            .as_array()
+            .ok_or(anyhow!("JSON has no rows array"))?
+        {
             let row = match row.as_array() {
                 Some(row) => row,
                 None => continue, // Skip row
             };
             let mut jsonl_row = vec![];
             for cm in &mapping.data {
-                if let Some((source_label,element_name)) = cm.mapping.get(0) {
+                if let Some((source_label, element_name)) = cm.mapping.get(0) {
                     if let Some(col_num) = label2col_num.get(source_label) {
                         if let Some(value) = row.get(*col_num) {
-                            let dc = DataCell::from_value(value,&cm.header, &element_name).await;
+                            let dc = DataCell::from_value(value, &cm.header, &element_name).await;
                             jsonl_row.push(dc);
                             continue;
                         }
@@ -151,69 +186,80 @@ impl Adapter for QuarryQueryAdapter {
                 }
                 jsonl_row.push(None);
             }
-            file.write_json_row(&json!{jsonl_row})?; // Output data row
+            file.write_json_row(&json! {jsonl_row})?; // Output data row
         }
         Ok(file.details())
     }
 }
 
-
-
 #[derive(Debug, Default)]
-pub struct PetScanAdapter {
-}
+pub struct PetScanAdapter {}
 
 #[async_trait]
 impl Adapter for PetScanAdapter {
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+    async fn source2file(
+        &mut self,
+        source: &SourceId,
+        mapping: &HeaderMapping,
+    ) -> Result<DataFileDetails> {
         let url = match source {
             SourceId::PetScan(id) => format!("https://petscan.wmflabs.org/?psid={id}&format=json&output_compatability=quick-intersection"),
             _ => return Err(anyhow!("Unsuitable source type for PetScan: {source:?}")),
         };
         let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;
-        
+
         let mut file = DataFile::new_output_file()?;
-        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
-        for row in j["pages"].as_array().ok_or(anyhow!("JSON has no rows array"))? {
+        file.write_json_row(&json! {mapping.as_data_header()})?; // Output new header
+        for row in j["pages"]
+            .as_array()
+            .ok_or(anyhow!("JSON has no rows array"))?
+        {
             let row = match row.as_object() {
                 Some(row) => row,
                 None => continue, // Skip row
             };
             let mut jsonl_row = vec![];
             for cm in &mapping.data {
-                if let Some((source_label,element_name)) = cm.mapping.get(0) {
+                if let Some((source_label, element_name)) = cm.mapping.get(0) {
                     // TODO sub-elements like metadata.defaultsort/metadata.disambiguation
                     if let Some(value) = row.get(source_label) {
-                        let dc = DataCell::from_value(value,&cm.header, &element_name).await;
+                        let dc = DataCell::from_value(value, &cm.header, &element_name).await;
                         jsonl_row.push(dc);
                         continue;
                     }
                 }
                 jsonl_row.push(None);
             }
-            file.write_json_row(&json!{jsonl_row})?; // Output data row
+            file.write_json_row(&json! {jsonl_row})?; // Output data row
         }
         Ok(file.details())
     }
 }
 
-
 #[derive(Debug, Default)]
-pub struct PagePileAdapter {
-}
+pub struct PagePileAdapter {}
 
 #[async_trait]
 impl Adapter for PagePileAdapter {
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+    async fn source2file(
+        &mut self,
+        source: &SourceId,
+        mapping: &HeaderMapping,
+    ) -> Result<DataFileDetails> {
         let url = match source {
-            SourceId::PagePile(id) => format!("https://pagepile.toolforge.org/api.php?id={id}&action=get_data&doit&format=json"),
+            SourceId::PagePile(id) => format!(
+                "https://pagepile.toolforge.org/api.php?id={id}&action=get_data&doit&format=json"
+            ),
             _ => return Err(anyhow!("Unsuitable source type for PagePile: {source:?}")),
         };
-        let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;        
+        let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;
         let mut file = DataFile::new_output_file()?;
-        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
+        file.write_json_row(&json! {mapping.as_data_header()})?; // Output new header
 
-        for page in j["pages"].as_array().ok_or(anyhow!("JSON has no rows array"))? {
+        for page in j["pages"]
+            .as_array()
+            .ok_or(anyhow!("JSON has no rows array"))?
+        {
             let prefixed_title = match page.as_str() {
                 Some(prefixed_title) => prefixed_title,
                 None => continue, // Skip row
@@ -221,75 +267,81 @@ impl Adapter for PagePileAdapter {
 
             let mut jsonl_row = vec![];
             for cm in &mapping.data {
-                if let Some((_source_label,element_name)) = cm.mapping.get(0) {
+                if let Some((_source_label, element_name)) = cm.mapping.get(0) {
                     let value = json!(prefixed_title);
-                    let dc = DataCell::from_value(&value,&cm.header, &element_name).await;
+                    let dc = DataCell::from_value(&value, &cm.header, &element_name).await;
                     jsonl_row.push(dc);
                     continue;
                 }
                 jsonl_row.push(None);
             }
-            file.write_json_row(&json!{jsonl_row})?; // Output data row
+            file.write_json_row(&json! {jsonl_row})?; // Output data row
         }
 
         Ok(file.details())
     }
 }
 
-
-
 #[derive(Debug, Default)]
-pub struct AListBuildingToolAdapter {
-}
+pub struct AListBuildingToolAdapter {}
 
 #[async_trait]
 impl Adapter for AListBuildingToolAdapter {
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+    async fn source2file(
+        &mut self,
+        source: &SourceId,
+        mapping: &HeaderMapping,
+    ) -> Result<DataFileDetails> {
         let url = match source {
-            SourceId::AListBuildingTool((wiki,q)) => format!("https://a-list-bulding-tool.toolforge.org/API/?wiki_db={wiki}&QID={q}"),
-            _ => return Err(anyhow!("Unsuitable source type for AListBuildingTool: {source:?}")),
+            SourceId::AListBuildingTool((wiki, q)) => {
+                format!("https://a-list-bulding-tool.toolforge.org/API/?wiki_db={wiki}&QID={q}")
+            }
+            _ => {
+                return Err(anyhow!(
+                    "Unsuitable source type for AListBuildingTool: {source:?}"
+                ))
+            }
         };
-        let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;        
-        
+        let j: Value = App::reqwest_client()?.get(url).send().await?.json().await?;
+
         let mut file = DataFile::new_output_file()?;
-        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
+        file.write_json_row(&json! {mapping.as_data_header()})?; // Output new header
 
         for entry in j.as_array().ok_or(anyhow!("JSON is not an array"))? {
             let title = match entry.get("title") {
                 Some(title) => match title.as_str() {
                     Some(title) => title,
                     None => continue, // Skip row
-                }
+                },
                 None => continue, // Skip row
             };
             let qid = match entry.get("qid") {
                 Some(qid) => match qid.as_str() {
                     Some(qid) => qid,
                     None => continue, // Skip row
-                }
+                },
                 None => continue, // Skip row
             };
-    
+
             let mut jsonl_row = vec![];
             for cm in &mapping.data {
-                for (source_label,element_name) in &cm.mapping {
+                for (source_label, element_name) in &cm.mapping {
                     let text = match source_label.as_str() {
                         "title" => title,
                         "qid" => qid,
                         _ => continue,
                     };
                     let j = json!(text);
-                    let dc = DataCell::from_value(&j,&cm.header, &element_name).await;
+                    let dc = DataCell::from_value(&j, &cm.header, &element_name).await;
                     jsonl_row.push(dc);
                 }
             }
-            file.write_json_row(&json!{jsonl_row})?; // Output data row
+            file.write_json_row(&json! {jsonl_row})?; // Output data row
         }
 
         Ok(file.details())
     }
 }
-
 
 #[derive(Debug, Default)]
 struct WdFistParams {
@@ -308,14 +360,14 @@ struct WdFistParams {
 
 impl WdFistParams {
     fn from_url(url: &Url) -> Result<Self> {
-        if url.host_str()!=Some("fist.toolforge.org") {
+        if url.host_str() != Some("fist.toolforge.org") {
             return Err(anyhow!("Not a WD-FIST URL: {url}"));
         }
         let mut ret = Self::default();
         ret.wdf_langlinks = true; // TODO from params, somehow
         ret.wdf_only_files_not_on_wd = true; // TODO from params, somehow
         ret.wdf_max_five_results = true; // TODO from params, somehow
-        url.query_pairs().for_each(|(k,v)|{
+        url.query_pairs().for_each(|(k, v)| {
             match k.as_ref() {
                 "sparql" => ret.sparql = Some(v.to_string()),
                 "language" => ret.language = Some(v.to_string()),
@@ -324,7 +376,7 @@ impl WdFistParams {
                 "depth" => ret.depth = v.parse::<i64>().ok(),
                 "pagepile" => ret.pagepile = v.parse::<u64>().ok(),
                 "psid" => ret.psid = v.parse::<u64>().ok(),
-                "no_images_only" => ret.no_images_only = v.parse::<u8>().unwrap_or(0)==1,
+                "no_images_only" => ret.no_images_only = v.parse::<u8>().unwrap_or(0) == 1,
                 _ => {} // Ignore
             }
         });
@@ -332,56 +384,60 @@ impl WdFistParams {
     }
 
     fn to_petscan_url(&self) -> String {
-        let mut params : Vec<(String,String)> = vec![];
-        params.push(("wdf_main".to_string(),"1".to_string()));
-        params.push(("doit".to_string(),"1".to_string()));
-        params.push(("format".to_string(),"json".to_string()));
+        let mut params: Vec<(String, String)> = vec![];
+        params.push(("wdf_main".to_string(), "1".to_string()));
+        params.push(("doit".to_string(), "1".to_string()));
+        params.push(("format".to_string(), "json".to_string()));
         if let Some(value) = &self.sparql {
-            params.push(("sparql".to_string(),value.to_owned()));
+            params.push(("sparql".to_string(), value.to_owned()));
         }
         if let Some(value) = &self.language {
-            params.push(("language".to_string(),value.to_owned()));
+            params.push(("language".to_string(), value.to_owned()));
         }
         if let Some(value) = &self.project {
-            params.push(("project".to_string(),value.to_owned()));
+            params.push(("project".to_string(), value.to_owned()));
         }
         if let Some(value) = &self.category {
-            params.push(("categories".to_string(),value.to_owned()));
+            params.push(("categories".to_string(), value.to_owned()));
         }
         if let Some(value) = &self.depth {
-            params.push(("depth".to_string(),format!("{value}")));
+            params.push(("depth".to_string(), format!("{value}")));
         }
         if let Some(value) = &self.pagepile {
-            params.push(("pagepile".to_string(),format!("{value}")));
+            params.push(("pagepile".to_string(), format!("{value}")));
         }
         if let Some(value) = &self.psid {
-            params.push(("psid".to_string(),format!("{value}")));
+            params.push(("psid".to_string(), format!("{value}")));
         }
 
         if self.no_images_only {
-            params.push(("wdf_only_items_without_p18".to_string(),"1".to_string()));
+            params.push(("wdf_only_items_without_p18".to_string(), "1".to_string()));
         }
         if self.wdf_langlinks {
-            params.push(("wdf_langlinks".to_string(),"1".to_string()));
+            params.push(("wdf_langlinks".to_string(), "1".to_string()));
         }
         if self.wdf_only_files_not_on_wd {
-            params.push(("wdf_only_files_not_on_wd".to_string(),"1".to_string()));
+            params.push(("wdf_only_files_not_on_wd".to_string(), "1".to_string()));
         }
         if self.wdf_max_five_results {
-            params.push(("wdf_max_five_results".to_string(),"1".to_string()));
+            params.push(("wdf_max_five_results".to_string(), "1".to_string()));
         }
-        let url = Url::parse_with_params("https://petscan.wmflabs.org",&params).expect("Hardcoded PetScan URL failed");
+        let url = Url::parse_with_params("https://petscan.wmflabs.org", &params)
+            .expect("Hardcoded PetScan URL failed");
         url.to_string()
     }
 }
 
 #[derive(Debug, Default)]
-pub struct WdFistAdapter {
-}
+pub struct WdFistAdapter {}
 
 #[async_trait]
 impl Adapter for WdFistAdapter {
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+    async fn source2file(
+        &mut self,
+        source: &SourceId,
+        mapping: &HeaderMapping,
+    ) -> Result<DataFileDetails> {
         let url = match source {
             SourceId::WdFist(url) => Url::parse(url)?,
             _ => return Err(anyhow!("Unsuitable source type for WdFist: {source:?}")),
@@ -389,17 +445,25 @@ impl Adapter for WdFistAdapter {
         let wdfist = WdFistParams::from_url(&url)?;
         let petscan_url = wdfist.to_petscan_url();
 
-        let j: Value = App::reqwest_client()?.get(petscan_url).send().await?.json().await?;        
-        
-        let mut file = DataFile::new_output_file()?;
-        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
+        let j: Value = App::reqwest_client()?
+            .get(petscan_url)
+            .send()
+            .await?
+            .json()
+            .await?;
 
-        for (qid,images) in j["data"].as_object().ok_or(anyhow!("JSON is not an object"))? {
+        let mut file = DataFile::new_output_file()?;
+        file.write_json_row(&json! {mapping.as_data_header()})?; // Output new header
+
+        for (qid, images) in j["data"]
+            .as_object()
+            .ok_or(anyhow!("JSON is not an object"))?
+        {
             let images = match images.as_object() {
                 Some(images) => images,
                 None => continue, // Ignore this
             };
-            for (image_name,count) in images.iter() {
+            for (image_name, count) in images.iter() {
                 if let Some(count) = count.as_i64() {
                     let mut jsonl_row = vec![];
 
@@ -407,19 +471,19 @@ impl Adapter for WdFistAdapter {
                     wp.prefixed_title = Some(qid.to_owned());
                     jsonl_row.push(DataCell::WikiPage(wp));
 
-                    let wp = WikiPage{
-                            title:Some(image_name.to_owned()),
-                            prefixed_title:Some(format!("File:{image_name}")),
-                            ns_id:Some(6),
-                            page_id:None,
-                            ns_prefix:Some("File".to_string()),
-                            wiki:Some("commonswiki".to_string())
-                        };
+                    let wp = WikiPage {
+                        title: Some(image_name.to_owned()),
+                        prefixed_title: Some(format!("File:{image_name}")),
+                        ns_id: Some(6),
+                        page_id: None,
+                        ns_prefix: Some("File".to_string()),
+                        wiki: Some("commonswiki".to_string()),
+                    };
                     jsonl_row.push(DataCell::WikiPage(wp));
 
                     jsonl_row.push(DataCell::Int(count));
 
-                    file.write_json_row(&json!{jsonl_row})?; // Output data row
+                    file.write_json_row(&json! {jsonl_row})?; // Output data row
                 }
             }
         }
@@ -427,9 +491,6 @@ impl Adapter for WdFistAdapter {
         Ok(file.details())
     }
 }
-
-
-
 
 #[derive(Debug, Default)]
 struct UserEditsParams {
@@ -443,16 +504,19 @@ struct UserEditsParams {
 
 impl UserEditsParams {
     fn from_url(url: &Url) -> Result<Self> {
-        if url.host_str()!=Some("wikidata-todo.toolforge.org") { // TODO || url.path()!="/user_edits.php"
+        if url.host_str() != Some("wikidata-todo.toolforge.org") {
+            // TODO || url.path()!="/user_edits.php"
             return Err(anyhow!("Not a UserEdits URL: {url}"));
         }
         let mut ret = Self::default();
-        url.query_pairs().for_each(|(k,v)|{
+        url.query_pairs().for_each(|(k, v)| {
             match k.as_ref() {
                 "sparql" => ret.sparql = Some(v.to_string()),
                 "pattern" => ret.pattern = Some(v.to_string()),
                 "user" => ret.user = v.to_string(),
-                "only_page_creations" => ret.only_page_creations = v.parse::<u8>().unwrap_or(0)==1,
+                "only_page_creations" => {
+                    ret.only_page_creations = v.parse::<u8>().unwrap_or(0) == 1
+                }
                 "start" => ret.start = Some(v.to_string()),
                 "end" => ret.end = Some(v.to_string()),
                 _ => {} // Ignore
@@ -462,38 +526,45 @@ impl UserEditsParams {
     }
 
     fn to_url(&self) -> String {
-        let mut params : Vec<(String,String)> = vec![];
-        params.push(("user".to_string(),self.user.to_string()));
-        params.push(("doit".to_string(),"1".to_string()));
-        params.push(("format".to_string(),"jsonl".to_string()));
+        let mut params: Vec<(String, String)> = vec![];
+        params.push(("user".to_string(), self.user.to_string()));
+        params.push(("doit".to_string(), "1".to_string()));
+        params.push(("format".to_string(), "jsonl".to_string()));
         if let Some(value) = &self.sparql {
-            params.push(("sparql".to_string(),value.to_owned()));
+            params.push(("sparql".to_string(), value.to_owned()));
         }
         if let Some(value) = &self.pattern {
-            params.push(("pattern".to_string(),value.to_owned()));
+            params.push(("pattern".to_string(), value.to_owned()));
         }
         if let Some(value) = &self.start {
-            params.push(("start".to_string(),value.to_owned()));
+            params.push(("start".to_string(), value.to_owned()));
         }
         if let Some(value) = &self.end {
-            params.push(("end".to_string(),value.to_owned()));
+            params.push(("end".to_string(), value.to_owned()));
         }
         if self.only_page_creations {
-            params.push(("only_page_creations".to_string(),"1".to_string()));
+            params.push(("only_page_creations".to_string(), "1".to_string()));
         }
 
-        let url = Url::parse_with_params("https://wikidata-todo.toolforge.org/user_edits.php",&params).expect("Hardcoded UserEdits URL failed");
+        let url = Url::parse_with_params(
+            "https://wikidata-todo.toolforge.org/user_edits.php",
+            &params,
+        )
+        .expect("Hardcoded UserEdits URL failed");
         url.to_string()
     }
 }
 
 #[derive(Debug, Default)]
-pub struct UserEditsAdapter {
-}
+pub struct UserEditsAdapter {}
 
 #[async_trait]
 impl Adapter for UserEditsAdapter {
-    async fn source2file(&mut self, source: &SourceId, mapping: &HeaderMapping) -> Result<DataFileDetails> {
+    async fn source2file(
+        &mut self,
+        source: &SourceId,
+        mapping: &HeaderMapping,
+    ) -> Result<DataFileDetails> {
         let url = match source {
             SourceId::UserEdits(url) => Url::parse(url)?,
             _ => return Err(anyhow!("Unsuitable source type for UserEdits: {source:?}")),
@@ -501,10 +572,15 @@ impl Adapter for UserEditsAdapter {
         let user_edits = UserEditsParams::from_url(&url)?;
         let user_edits_url = user_edits.to_url();
 
-        let result: String = App::reqwest_client()?.get(user_edits_url).send().await?.text().await?;
-        
+        let result: String = App::reqwest_client()?
+            .get(user_edits_url)
+            .send()
+            .await?
+            .text()
+            .await?;
+
         let mut file = DataFile::new_output_file()?;
-        file.write_json_row(&json!{mapping.as_data_header()})?; // Output new header
+        file.write_json_row(&json! {mapping.as_data_header()})?; // Output new header
 
         for s in result.split("\n") {
             let j: Value = match serde_json::from_str(s) {
@@ -514,32 +590,31 @@ impl Adapter for UserEditsAdapter {
             let mut jsonl_row = vec![];
             for cm in &mapping.data {
                 match &cm.header.kind {
-                    crate::data_header::ColumnHeaderType::PlainText => {
-                        match cm.mapping.get(0) {
-                            Some((from,_to)) => {
-                                match j.get(from) {
-                                    Some(data) => {
-                                        match data.as_str() {
-                                            Some(s) => jsonl_row.push(DataCell::PlainText(s.to_string())),
-                                            None => jsonl_row.push(DataCell::Blank),
-                                        }
-                                    },
-                                    None => jsonl_row.push(DataCell::Blank),
-                                }
+                    crate::data_header::ColumnHeaderType::PlainText => match cm.mapping.get(0) {
+                        Some((from, _to)) => match j.get(from) {
+                            Some(data) => match data.as_str() {
+                                Some(s) => jsonl_row.push(DataCell::PlainText(s.to_string())),
+                                None => jsonl_row.push(DataCell::Blank),
                             },
                             None => jsonl_row.push(DataCell::Blank),
-                        }
+                        },
+                        None => jsonl_row.push(DataCell::Blank),
                     },
                     crate::data_header::ColumnHeaderType::WikiPage(_) => {
                         let mut wp = WikiPage::new_wikidata_item();
-                        wp.prefixed_title = Some(j.get("page_title").unwrap().as_str().unwrap().to_string());
+                        wp.prefixed_title =
+                            Some(j.get("page_title").unwrap().as_str().unwrap().to_string());
                         jsonl_row.push(DataCell::WikiPage(wp));
-                    },
-                    crate::data_header::ColumnHeaderType::Int => return Err(anyhow!("Unsupported type for UserEdits: Int")),
-                    crate::data_header::ColumnHeaderType::Float => return Err(anyhow!("Unsupported type for UserEdits: Float")),
+                    }
+                    crate::data_header::ColumnHeaderType::Int => {
+                        return Err(anyhow!("Unsupported type for UserEdits: Int"))
+                    }
+                    crate::data_header::ColumnHeaderType::Float => {
+                        return Err(anyhow!("Unsupported type for UserEdits: Float"))
+                    }
                 }
             }
-            file.write_json_row(&json!{jsonl_row})?; // Output data row
+            file.write_json_row(&json! {jsonl_row})?; // Output data row
         }
 
         Ok(file.details())
@@ -556,19 +631,24 @@ mod tests {
         let hm = "{\"data\":[{\"header\":{\"kind\":{\"WikiPage\":{\"ns_id\":0,\"ns_prefix\":null,\"page_id\":null,\"prefixed_title\":null,\"title\":null,\"wiki\":\"wikidatawiki\"}},\"name\":\"wikidat_item\"},\"mapping\":[[\"page\",\"prefixed_title\"]]}]}";
         let header_mapping: HeaderMapping = serde_json::from_str(hm).unwrap();
         let id = 51805;
-        let df = PagePileAdapter::default().source2file(&&SourceId::PagePile(id), &header_mapping).await.unwrap();
-        assert_eq!(df.rows,1748);
+        let df = PagePileAdapter::default()
+            .source2file(&&SourceId::PagePile(id), &header_mapping)
+            .await
+            .unwrap();
+        assert_eq!(df.rows, 1748);
         APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
     }
-
 
     #[tokio::test]
     async fn test_adapter_petscan() {
         let hm = "{\"data\":[{\"header\":{\"kind\":{\"WikiPage\":{\"ns_id\":null,\"ns_prefix\":null,\"page_id\":null,\"prefixed_title\":null,\"title\":null,\"wiki\":\"enwiki\"}},\"name\":\"wiki_page\"},\"mapping\":[[\"page_title\",\"title\"],[\"page_namespace\",\"ns_id\"]]}]}";
         let header_mapping: HeaderMapping = serde_json::from_str(hm).unwrap();
         let id = 25951472;
-        let df = PetScanAdapter::default().source2file(&&&SourceId::PetScan(id), &header_mapping).await.unwrap();
-        assert_eq!(df.rows,2);
+        let df = PetScanAdapter::default()
+            .source2file(&&&SourceId::PetScan(id), &header_mapping)
+            .await
+            .unwrap();
+        assert_eq!(df.rows, 2);
         APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
     }
 
@@ -576,9 +656,12 @@ mod tests {
     async fn test_adapter_alistbuildingtool() {
         let hm = "{\"data\":[{\"header\":{\"kind\":{\"WikiPage\":{\"ns_id\":null,\"ns_prefix\":null,\"page_id\":null,\"prefixed_title\":null,\"title\":null,\"wiki\":\"enwiki\"}},\"name\":\"wiki_page\"},\"mapping\":[[\"title\",\"prefixed_title\"]]}]}";
         let header_mapping: HeaderMapping = serde_json::from_str(hm).unwrap();
-        let id = ("enwiki".to_string(),"Q82069695".to_string());
-        let df = AListBuildingToolAdapter::default().source2file(&&&SourceId::AListBuildingTool(id), &header_mapping).await.unwrap();
-        assert!(df.rows>1);
+        let id = ("enwiki".to_string(), "Q82069695".to_string());
+        let df = AListBuildingToolAdapter::default()
+            .source2file(&&&SourceId::AListBuildingTool(id), &header_mapping)
+            .await
+            .unwrap();
+        assert!(df.rows > 1);
         APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
     }
 
@@ -587,22 +670,27 @@ mod tests {
         let j = json!({"data": [{"header": {"kind": {"WikiPage": {"ns_id": 0,"ns_prefix": null,"page_id": null,"prefixed_title": null,"title": null,"wiki": "wikidatawiki"}},"name": "wikidata_item"},"mapping": []},{"header": {"kind": {"WikiPage": {"ns_id": 6,"ns_prefix": "File","page_id": null,"prefixed_title": null,"title": null,"wiki": "commonswiki"}},"name": "commons_image"},"mapping": []},{"header": {"kind": {"Int": null},"name": "number_of_uses"},"mapping": []}]});
         let header_mapping: HeaderMapping = serde_json::from_str(&j.to_string()).unwrap();
         let id = "https://fist.toolforge.org/wdfist/index.html?depth=3&language=en&project=wikipedia&sparql=SELECT%20?item%20WHERE%20{%20?item%20wdt:P31%20wd:Q5%20;%20wdt:P21%20wd:Q6581072%20;%20wdt:P106/wdt:P279*%20wd:Q901%20}%20LIMIT%2010&remove_used=1&remove_multiple=1&prefilled=1".to_string();
-        let df = WdFistAdapter::default().source2file(&SourceId::WdFist(id), &header_mapping).await.unwrap();
-        assert!(df.rows>1);
+        let df = WdFistAdapter::default()
+            .source2file(&SourceId::WdFist(id), &header_mapping)
+            .await
+            .unwrap();
+        assert!(df.rows > 1);
         APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
     }
 
     #[tokio::test]
     async fn test_adapter_user_edits() {
         let j = json!({"data": [
-            {"header": {"kind": {"WikiPage": {"ns_id": 0,"ns_prefix": null,"page_id": null,"prefixed_title": null,"title": null,"wiki": "wikidatawiki"}},"name": "wikidata_item"},"mapping": []},
-            {"header": {"kind": "PlainText","name": "timestamp"},"mapping": [["rev_timestamp","timestamp"]]}
-            ]});
+        {"header": {"kind": {"WikiPage": {"ns_id": 0,"ns_prefix": null,"page_id": null,"prefixed_title": null,"title": null,"wiki": "wikidatawiki"}},"name": "wikidata_item"},"mapping": []},
+        {"header": {"kind": "PlainText","name": "timestamp"},"mapping": [["rev_timestamp","timestamp"]]}
+        ]});
         let header_mapping: HeaderMapping = serde_json::from_str(&j.to_string()).unwrap();
         let id = "https://wikidata-todo.toolforge.org/user_edits.php?sparql=&pattern=&user=Naive+rm&start=&end=&only_page_creations=1&doit=Do+it&format=html".to_string();
-        let df = UserEditsAdapter::default().source2file(&SourceId::UserEdits(id), &header_mapping).await.unwrap();
-        assert!(df.rows>3300);
+        let df = UserEditsAdapter::default()
+            .source2file(&SourceId::UserEdits(id), &header_mapping)
+            .await
+            .unwrap();
+        assert!(df.rows > 3300);
         APP.remove_uuid_file(&df.uuid).unwrap(); // Cleanup
     }
-
 }

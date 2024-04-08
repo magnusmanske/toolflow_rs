@@ -1,12 +1,12 @@
-use std::collections::HashMap;
-use std::{fmt, fs::File};
-use std::io::{Write, BufReader, BufWriter, BufRead};
-use anyhow::{anyhow, Result};
-use serde_json::Value;
-use uuid::Uuid;
-use crate::APP;
 use crate::data_cell::DataCell;
 use crate::data_header::DataHeader;
+use crate::APP;
+use anyhow::{anyhow, Result};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::{fmt, fs::File};
+use uuid::Uuid;
 
 // This class is used for thread-/async-safe passing of key data
 #[derive(Default, Clone, Debug)]
@@ -42,8 +42,8 @@ pub struct DataFile {
 impl fmt::Debug for DataFile {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("DataFile")
-         .field("uuid", &self.uuid)
-         .finish()
+            .field("uuid", &self.uuid)
+            .finish()
     }
 }
 
@@ -72,13 +72,14 @@ impl DataFile {
     }
 
     pub fn write_json_row(&mut self, v: &Value) -> Result<()> {
-        if let Some(a) = v.as_array() { // Do not output empty data rows
+        if let Some(a) = v.as_array() {
+            // Do not output empty data rows
             if a.is_empty() {
                 return Ok(());
             }
         }
         let fh = self.writer()?;
-        writeln!(fh,"{v}")?;
+        writeln!(fh, "{v}")?;
         self.row_counter += 1;
         Ok(())
     }
@@ -95,10 +96,12 @@ impl DataFile {
 
     pub fn open_named_output_file(&mut self, uuid: &str) -> Result<()> {
         if self.is_output_open() {
-            return Ok(())
+            return Ok(());
         }
         self.uuid = Some(uuid.to_string());
-        let path = self.path().expect("base name was just set, this should be impossible");
+        let path = self
+            .path()
+            .expect("base name was just set, this should be impossible");
         let file_handle = File::create(path)?;
         let writer = BufWriter::new(file_handle);
         self.writer = Some(writer);
@@ -107,7 +110,9 @@ impl DataFile {
 
     pub fn open_input_file(&mut self, uuid: &str) -> Result<()> {
         self.uuid = Some(uuid.to_string());
-        let path = self.path().expect("base name was just set, this should be impossible");
+        let path = self
+            .path()
+            .expect("base name was just set, this should be impossible");
         let file_handle = File::open(path)?;
         let reader = BufReader::new(file_handle);
         self.reader = Some(reader);
@@ -122,7 +127,7 @@ impl DataFile {
 
     pub fn path(&self) -> Option<String> {
         let name = self.uuid.as_ref()?;
-        Some(format!("{}/{name}.jsonl",APP.data_path()))
+        Some(format!("{}/{name}.jsonl", APP.data_path()))
     }
 
     pub fn uuid(&self) -> &Option<String> {
@@ -154,7 +159,9 @@ impl DataFile {
     }
 
     pub fn load_header(&mut self) -> Result<()> {
-        let row = self.read_row().ok_or(anyhow!("No header row in JSONL file"))?;
+        let row = self
+            .read_row()
+            .ok_or(anyhow!("No header row in JSONL file"))?;
         self.header = serde_json::from_str(&row)?;
         Ok(())
     }
@@ -178,17 +185,26 @@ impl DataFile {
         &self.header
     }
 
-    pub fn key2row(&self, key: &str) -> Result<HashMap<String,usize>> {
+    pub fn key2row(&self, key: &str) -> Result<HashMap<String, usize>> {
         let mut ret = HashMap::new();
-        let key_col_num = self.header.get_col_num(key).ok_or(anyhow!("No column named '{key}'"))?;
-        for (row_num,row) in self.rows.iter().enumerate() {
+        let key_col_num = self
+            .header
+            .get_col_num(key)
+            .ok_or(anyhow!("No column named '{key}'"))?;
+        for (row_num, row) in self.rows.iter().enumerate() {
             let cell = match row.get(key_col_num) {
                 Some(cell) => cell,
-                None => return Err(anyhow!("None value found for key '{key}' in data row {row_num}")),
+                None => {
+                    return Err(anyhow!(
+                        "None value found for key '{key}' in data row {row_num}"
+                    ))
+                }
             };
             let cell_key = cell.as_key();
             if ret.contains_key(&cell_key) {
-                return Err(anyhow!("Duplicate key '{cell_key}' for '{key}' in data row {row_num}"));
+                return Err(anyhow!(
+                    "Duplicate key '{cell_key}' for '{key}' in data row {row_num}"
+                ));
             }
             ret.insert(cell_key, row_num);
         }

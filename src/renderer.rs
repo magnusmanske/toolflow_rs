@@ -1,20 +1,29 @@
-use std::sync::{Mutex, Arc};
-use ucfirst::ucfirst;
+use crate::{
+    data_cell::DataCell,
+    data_file::DataFile,
+    data_header::{ColumnHeader, ColumnHeaderType},
+};
+use anyhow::{anyhow, Result};
 use lazy_static::lazy_static;
-use anyhow::{Result,anyhow};
 use regex::Regex;
-use crate::{data_file::DataFile, data_cell::DataCell, data_header::{ColumnHeader, ColumnHeaderType}};
+use std::sync::{Arc, Mutex};
+use ucfirst::ucfirst;
 
-lazy_static!{
+lazy_static! {
     static ref RE_WIKI_TO_PREFIX: Regex = Regex::new(r"^(.+)wik.*$").expect("Regex error");
 }
-
 
 pub trait Renderer {
     fn render_header(&self, df: &mut DataFile) -> Result<String>;
     fn render_footer(&self, df: &mut DataFile) -> Result<String>;
     fn render_row(&self, df: &mut DataFile, row_num: usize, row: Vec<DataCell>) -> Result<String>;
-    fn render_cell(&self, col_header: &ColumnHeader, row_num: usize, col_num: usize, cell: DataCell) -> Result<String>;
+    fn render_cell(
+        &self,
+        col_header: &ColumnHeader,
+        row_num: usize,
+        col_num: usize,
+        cell: DataCell,
+    ) -> Result<String>;
 
     fn render_from_uuid(&self, uuid: &str) -> Result<String> {
         let mut df = DataFile::default();
@@ -43,12 +52,23 @@ pub trait Renderer {
         Ok(ret)
     }
 
-    fn render_row_separators(&self, df: &mut DataFile, row_num: usize, row: Vec<DataCell>, before: &str, between: &str, after: &str) -> Result<String> {
+    fn render_row_separators(
+        &self,
+        df: &mut DataFile,
+        row_num: usize,
+        row: Vec<DataCell>,
+        before: &str,
+        between: &str,
+        after: &str,
+    ) -> Result<String> {
         let mut ret = before.to_string();
-        ret += &row.into_iter()
+        ret += &row
+            .into_iter()
             .zip(df.header().columns.iter())
             .enumerate()
-            .map(|(col_num,(cell,col_header))|self.render_cell(col_header,row_num,col_num,cell))
+            .map(|(col_num, (cell, col_header))| {
+                self.render_cell(col_header, row_num, col_num, cell)
+            })
             .collect::<Result<Vec<String>>>()?
             .join(between);
         ret += after;
@@ -69,7 +89,7 @@ impl RendererWikitext {
                     Ok(mut dw) => {
                         if dw.is_none() && wp.wiki.is_some() {
                             *dw = wp.wiki.to_owned();
-                        }        
+                        }
                     }
                     Err(e) => return Err(anyhow!("{e}")),
                 }
@@ -79,7 +99,7 @@ impl RendererWikitext {
     }
 
     fn pretty_filename(&self, title: &str) -> String {
-        let filename_pretty = title.replace('_'," ");
+        let filename_pretty = title.replace('_', " ");
 
         // Remove file prefix
         let filename_pretty = match filename_pretty.split_once(':') {
@@ -103,9 +123,12 @@ impl Renderer for RendererWikitext {
 
         let mut ret = String::new();
         ret += "{| class=\"wikitable\"\n";
-        ret += &df.header().columns.iter()
-            .map(|c|ucfirst(&c.name.replace('_'," ")))
-            .map(|s|format!("! {s}\n"))
+        ret += &df
+            .header()
+            .columns
+            .iter()
+            .map(|c| ucfirst(&c.name.replace('_', " ")))
+            .map(|s| format!("! {s}\n"))
             .collect::<Vec<String>>()
             .join("");
         Ok(ret)
@@ -119,60 +142,76 @@ impl Renderer for RendererWikitext {
     }
 
     fn render_row(&self, df: &mut DataFile, row_num: usize, row: Vec<DataCell>) -> Result<String> {
-        self.render_row_separators(df,row_num,row,"|--\n","","")
+        self.render_row_separators(df, row_num, row, "|--\n", "", "")
     }
 
-    fn render_cell(&self, col_header: &ColumnHeader, row_num: usize, col_num: usize, cell: DataCell) -> Result<String> {
+    fn render_cell(
+        &self,
+        col_header: &ColumnHeader,
+        row_num: usize,
+        col_num: usize,
+        cell: DataCell,
+    ) -> Result<String> {
         let default_wiki = self.default_wiki.lock().unwrap();
-        Ok("||".to_string() + &match cell {
-            DataCell::PlainText(s) => s,
-            DataCell::WikiPage(wp) => {
-                let mut title = wp.prefixed_title.ok_or_else(||anyhow!("Row {row_num} column {col_num}: WikiPage has no prefixed_title"))?;
-                let col_wp = match &col_header.kind  {
-                    ColumnHeaderType::WikiPage(col_wp) => col_wp,
-                    _ => return Err(anyhow!("Row {row_num} column {col_num}: cell is WikiPage but header is not")),
-                };
-                let wiki = wp.wiki.to_owned().or(col_wp.wiki.to_owned());
-                let wiki = wiki.ok_or_else(||anyhow!("Row {row_num} column {col_num}: No wiki for WikiPage"))?;
-                let is_local_wiki = wp.wiki==*default_wiki;
-                if !is_local_wiki {
-                    if wiki=="commonswiki" && wp.ns_id==Some(6) { // File on Commons
+        Ok("||".to_string()
+            + &match cell {
+                DataCell::PlainText(s) => s,
+                DataCell::WikiPage(wp) => {
+                    let mut title = wp.prefixed_title.ok_or_else(|| {
+                        anyhow!("Row {row_num} column {col_num}: WikiPage has no prefixed_title")
+                    })?;
+                    let col_wp = match &col_header.kind {
+                        ColumnHeaderType::WikiPage(col_wp) => col_wp,
+                        _ => return Err(anyhow!(
+                            "Row {row_num} column {col_num}: cell is WikiPage but header is not"
+                        )),
+                    };
+                    let wiki = wp.wiki.to_owned().or(col_wp.wiki.to_owned());
+                    let wiki = wiki.ok_or_else(|| {
+                        anyhow!("Row {row_num} column {col_num}: No wiki for WikiPage")
+                    })?;
+                    let is_local_wiki = wp.wiki == *default_wiki;
+                    if !is_local_wiki {
+                        if wiki == "commonswiki" && wp.ns_id == Some(6) {
+                            // File on Commons
+                            let filename_pretty = self.pretty_filename(&title);
+                            title = format!("{title}|thumbnail|{filename_pretty}");
+                        } else {
+                            let wiki_prefix = RE_WIKI_TO_PREFIX.replace(&wiki, "$1");
+                            title = format!(":{wiki_prefix}:{title}");
+                        }
+                    } else if wp.ns_id == Some(0) && wiki == "wikidatawiki" {
+                        // Wikidata item on Wikidata
+                        return Ok(format!("||{{{{Q|{}}}}}\n", &title[1..]));
+                    } else if wp.ns_id == Some(120) && wiki == "wikidatawiki" {
+                        // Wikidata property on Wikidata
+                        return Ok(format!("||{{{{P|{}}}}}\n", &title[1..]));
+                    } else if wp.ns_id == Some(6) {
+                        // Local file
                         let filename_pretty = self.pretty_filename(&title);
                         title = format!("{title}|thumbnail|{filename_pretty}");
-                    } else {
-                        let wiki_prefix = RE_WIKI_TO_PREFIX.replace(&wiki,"$1");
-                        title = format!(":{wiki_prefix}:{title}");
+                    } else if wp.ns_id == Some(14) {
+                        // Local category
+                        title = format!(":{title}");
                     }
-                } else if wp.ns_id==Some(0) && wiki=="wikidatawiki" { // Wikidata item on Wikidata
-                    return Ok(format!("||{{{{Q|{}}}}}\n",&title[1..]));
-                } else if wp.ns_id==Some(120) && wiki=="wikidatawiki" { // Wikidata property on Wikidata
-                    return Ok(format!("||{{{{P|{}}}}}\n",&title[1..]));
-                } else if wp.ns_id==Some(6) { // Local file
-                    let filename_pretty = self.pretty_filename(&title);
-                    title = format!("{title}|thumbnail|{filename_pretty}");
-                } else if wp.ns_id==Some(14) { // Local category
-                    title = format!(":{title}");
-                }
 
-                let mut link = title.to_owned();
-                if wp.ns_id!=Some(6) && title.contains('_') {
-                    let pretty_title = title.replace('_', " ");
-                    link = match title.chars().next() {
-                        Some(':') => format!("{title}|{}",pretty_title[1..].to_string()),
-                        _ => pretty_title,
-                    };
+                    let mut link = title.to_owned();
+                    if wp.ns_id != Some(6) && title.contains('_') {
+                        let pretty_title = title.replace('_', " ");
+                        link = match title.chars().next() {
+                            Some(':') => format!("{title}|{}", pretty_title[1..].to_string()),
+                            _ => pretty_title,
+                        };
+                    }
+                    format!("[[{link}]]")
                 }
-                format!("[[{link}]]")
-            },
-            DataCell::Int(i) => format!("{i}"),
-            DataCell::Float(f) => format!("{f}"),
-            DataCell::Blank => String::new(),
-        }+"\n")
+                DataCell::Int(i) => format!("{i}"),
+                DataCell::Float(f) => format!("{f}"),
+                DataCell::Blank => String::new(),
+            }
+            + "\n")
     }
-
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -182,7 +221,6 @@ mod tests {
     fn test_renderer_wikitext() {
         let uuid = "cb1e218e-421f-46b8-a77e-eac6799ce4e4";
         let wikitext = RendererWikitext::default().render_from_uuid(uuid).unwrap();
-        assert_eq!(wikitext.len(),77266);
+        assert_eq!(wikitext.len(), 77266);
     }
-
 }
