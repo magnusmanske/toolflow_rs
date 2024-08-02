@@ -21,10 +21,10 @@ impl Generator {
         APP.add_user_oauth_to_api(&mut api, user_id).await?;
 
         let title = mediawiki::title::Title::new_from_full(page, &api);
-        let page = mediawiki::page::Page::new(title);
+        let mut page = mediawiki::page::Page::new(title);
         let before = match page.text(&api).await {
             Ok(wikitext) => wikitext,
-            Err(mediawiki::page::PageError::Missing(_)) => String::new(),
+            Err(mediawiki::MediaWikiError::Missing(_)) => "",
             Err(e) => return Err(anyhow!(e.to_string())),
         };
 
